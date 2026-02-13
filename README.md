@@ -12,6 +12,8 @@ A self-hosted council runtime for structured multi-agent deliberation with:
 - Final leader summary entry.
 - Execution handoff artifact with human-approval gating.
 
+Contributor docs: see [`/Users/eric/code/llm-council/docs/README.md`](/Users/eric/code/llm-council/docs/README.md).
+
 ## Protocol Rules Implemented
 
 1. Each member gets one turn per round.
