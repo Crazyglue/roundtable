@@ -230,27 +230,6 @@ export function buildDocumentationOutputPrompt(
   ].join("\n");
 }
 
-export function buildMemberSummaryPrompt(
-  member: CouncilMemberConfig,
-  transcript: string,
-  finalResolution: string
-): string {
-  return [
-    `You are ${member.name} (${member.id}).`,
-    `Role: ${member.role}`,
-    `Traits: ${member.traits.join(", ")}`,
-    "",
-    "Create a concise MEMORY.md session summary from your perspective.",
-    "Include: what mattered, why you voted as you did, and what to watch next.",
-    `Final resolution: ${finalResolution}`,
-    "",
-    "Output plain markdown (no JSON).",
-    "",
-    "Transcript:",
-    transcript
-  ].join("\n");
-}
-
 export function normalizeTurnAction(value: unknown): TurnAction {
   const parseError = getParseErrorMessage(value);
   if (parseError) {

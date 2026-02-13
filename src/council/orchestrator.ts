@@ -28,7 +28,6 @@ import {
   buildDocumentationOutputPrompt,
   buildLeaderElectionPrompt,
   buildLeaderSummaryPrompt,
-  buildMemberSummaryPrompt,
   buildSecondingPrompt,
   buildTurnPrompt,
   buildVotePrompt,
@@ -85,7 +84,6 @@ export class CouncilOrchestrator {
         payload
       };
       await recorder.appendEvent(event);
-      await memoryStore.appendEventForAll(event);
     };
 
     await appendEvent("SESSION_STARTED", 0, {
@@ -342,34 +340,6 @@ export class CouncilOrchestrator {
       );
     }
 
-    await Promise.all(
-      this.config.members.map(async (member) => {
-        const summaryPrompt = buildMemberSummaryPrompt(member, recorder.getTranscript(), leaderSummary.finalResolution);
-        const content = await this.requireClient(member.id).completeText(
-          [
-            { role: "system", content: member.systemPrompt },
-            { role: "user", content: summaryPrompt }
-          ],
-          { temperature: member.model.temperature, maxTokens: member.model.maxTokens }
-        ).catch((error: unknown) => {
-          const message = error instanceof Error ? error.message : String(error);
-          console.error("[council] member summary generation failed", {
-            sessionId,
-            memberId: member.id,
-            memberName: member.name,
-            message
-          });
-          throw error;
-        });
-        await memoryStore.appendSessionSummary(member.id, sessionId, content);
-      })
-    );
-
-    await memoryStore.appendCouncilSummary(
-      sessionId,
-      `- Leader: ${leaderId}\n- Ended by: ${endedBy}\n- Resolution: ${leaderSummary.finalResolution}`
-    );
-
     const executionApproved =
       !this.config.execution.requireHumanApproval || options.approveExecution;
 
@@ -400,6 +370,18 @@ export class CouncilOrchestrator {
         outputType
       }
     );
+
+    await memoryStore.recordSession({
+      sessionId,
+      humanPrompt: options.humanPrompt,
+      leaderId,
+      endedBy,
+      finalResolution: leaderSummary.finalResolution,
+      outputType,
+      leaderSummary,
+      events: recorder.getEvents(),
+      executionApproved
+    });
 
     await recorder.finalize({
       sessionId,

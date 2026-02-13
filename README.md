@@ -7,7 +7,7 @@ A self-hosted council runtime for structured multi-agent deliberation with:
 - Turn actions: `CONTRIBUTE`, `PASS`, `CALL_VOTE`.
 - Motion seconding and blind voting.
 - Majority-of-full-council voting (`ABSTAIN` effectively counts as `NO`).
-- Per-event memory updates for every member.
+- Structured per-member memory (`MEMORY.json`) with rendered markdown snapshots.
 - Full session recording and review artifacts.
 - Final leader summary entry.
 - Execution handoff artifact with human-approval gating.
@@ -90,8 +90,10 @@ Under `storage.rootDir/sessions/<session_id>/`:
 Under `storage.memoryDir/`:
 
 - `COUNCIL.md`: council-level historical memory.
+- `COUNCIL.json`: canonical structured council memory.
 - `<member_id>/AGENT.md`: member profile.
-- `<member_id>/MEMORY.md`: rolling notes + session summaries.
+- `<member_id>/MEMORY.json`: canonical structured member memory records + prompt context.
+- `<member_id>/MEMORY.md`: rendered memory snapshot from `MEMORY.json`.
 
 ## Notes
 

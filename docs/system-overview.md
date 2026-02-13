@@ -17,7 +17,7 @@ This project runs a structured multi-agent "council" over a user prompt and can 
    - motion seconding
    - blind voting
    - finalization
-4. Every stage writes events and memory updates.
+4. Session events are written incrementally and memory is refreshed at close from session outcomes.
 5. Session artifacts are written to `.council/sessions/<session_id>/`.
 
 ## High-Level Architecture

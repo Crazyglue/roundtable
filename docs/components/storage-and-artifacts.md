@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Persist all deliberation state so sessions are auditable and memory can accumulate.
+Persist all deliberation state so sessions are auditable and memory remains useful across runs.
 
 ## Key Files
 
@@ -12,9 +12,11 @@ Persist all deliberation state so sessions are auditable and memory can accumula
 ## Directory Layout
 
 - `.council/memory/`
-  - `COUNCIL.md`
+  - `COUNCIL.json` (canonical structured council memory)
+  - `COUNCIL.md` (human-readable council snapshot)
   - `<member_id>/AGENT.md`
-  - `<member_id>/MEMORY.md`
+  - `<member_id>/MEMORY.json` (canonical structured member memory)
+  - `<member_id>/MEMORY.md` (human-readable member memory snapshot)
 - `.council/sessions/<session_id>/`
   - `transcript.md`
   - `events.json`
@@ -25,8 +27,9 @@ Persist all deliberation state so sessions are auditable and memory can accumula
 
 ## Write Strategy
 
-- Event log writes happen incrementally.
-- Memory updates happen for each event and final summaries.
+- Session event log writes happen incrementally in the recorder.
+- Member/council memory is updated once at session close from final outcomes and event-derived signals.
+- `*.json` memory files are canonical; `*.md` files are deterministic renderings of those JSON files.
 - Session finalization writes resolved state and artifact pointers.
 
 ## Contributor Touchpoints

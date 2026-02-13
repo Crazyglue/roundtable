@@ -9,6 +9,7 @@ Run the council protocol from start to finish, including:
 - motions, seconding, voting
 - final leader summary
 - optional output artifact generation
+- session-close memory refresh
 
 ## Key Files
 
@@ -25,6 +26,7 @@ Run the council protocol from start to finish, including:
 4. Close via majority vote or round limit.
 5. Generate leader summary.
 6. Optionally generate output artifact (`documentation.md`).
+7. Write `SESSION_CLOSED` and refresh memory state from session outcomes.
 
 ## Error Handling
 
