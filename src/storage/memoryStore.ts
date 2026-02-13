@@ -105,7 +105,8 @@ interface RecordSessionInput {
 }
 
 const MEMBER_RECORD_LIMIT = 80;
-const SESSION_DIGEST_LIMIT = 20;
+const SESSION_DIGEST_LIMIT = 40;
+const PROMPT_CONTEXT_SESSION_WINDOW = 25;
 const COUNCIL_SESSION_LIMIT = 50;
 const COUNCIL_RECORD_LIMIT = 80;
 
@@ -360,7 +361,7 @@ export class MemoryStore {
     ].slice(0, SESSION_DIGEST_LIMIT);
 
     const compactRecords = this.pruneRecords(records, MEMBER_RECORD_LIMIT);
-    const promptContext = this.buildPromptContext(compactRecords);
+    const promptContext = this.buildPromptContext(compactRecords, recentSessions);
 
     return {
       ...memory,
@@ -512,9 +513,19 @@ export class MemoryStore {
     return [...dedup.values()].slice(-8);
   }
 
-  private buildPromptContext(records: MemoryRecord[]): PromptContextV2 {
+  private buildPromptContext(records: MemoryRecord[], recentSessions: SessionDigest[]): PromptContextV2 {
+    const activeSessionIds = new Set(
+      recentSessions.slice(0, PROMPT_CONTEXT_SESSION_WINDOW).map((session) => session.sessionId)
+    );
+    const scopedRecords = records.filter((record) => {
+      if (record.evidence.length === 0) {
+        return true;
+      }
+      return record.evidence.some((item) => activeSessionIds.has(item.sessionId));
+    });
+
     const pick = (kind: MemoryKind, limit: number): string[] =>
-      records
+      scopedRecords
         .filter((record) => record.kind === kind && record.status === "active")
         .slice(0, limit)
         .map((record) => record.summary);
@@ -642,7 +653,7 @@ export class MemoryStore {
       `- Updated: ${council.updatedAt}`,
       `- Council Name: ${this.config.councilName}`,
       `- Purpose: ${this.config.purpose}`,
-      `- Max Rounds: ${this.config.maxRounds}`,
+      `- Deliberation Rounds: high-level=${this.config.deliberation.highLevelRounds}, implementation=${this.config.deliberation.implementationRounds}`,
       "- Voting Rule: Majority of full council (abstentions count as NO)",
       ""
     ];

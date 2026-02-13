@@ -5,7 +5,7 @@
 Run the council protocol from start to finish, including:
 
 - leader election
-- turn-based deliberation
+- two-pass turn-based deliberation (`HIGH_LEVEL` then `IMPLEMENTATION`)
 - motions, seconding, voting
 - final leader summary
 - optional output artifact generation
@@ -20,13 +20,16 @@ Run the council protocol from start to finish, including:
 
 1. `SESSION_STARTED`
 2. Leader election ballots -> `LEADER_ELECTED`
-3. For each round/member:
+3. `PASS_STARTED` for `HIGH_LEVEL`; for each round/member:
    - `TURN_ACTION`
    - if motion called: seconding + voting
-4. Close via majority vote or round limit.
-5. Generate leader summary.
-6. Optionally generate output artifact (`documentation.md`).
-7. Write `SESSION_CLOSED` and refresh memory state from session outcomes.
+4. `PASS_COMPLETED` for `HIGH_LEVEL`.
+5. `PASS_STARTED` for `IMPLEMENTATION`; repeat round/member loop.
+6. `PASS_COMPLETED` for `IMPLEMENTATION`.
+7. Generate leader summary.
+8. Optionally generate output artifact (`documentation.md`).
+   - Documentation output requires explicit known risks and mitigations.
+9. Write `SESSION_CLOSED` and refresh memory state from session outcomes.
 
 ## Error Handling
 

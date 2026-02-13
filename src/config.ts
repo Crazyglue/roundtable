@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { CouncilConfig, ModelAuthConfig } from "./types.js";
+import { CouncilConfig, DeliberationConfig, ModelAuthConfig } from "./types.js";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -48,7 +48,6 @@ export async function loadConfig(configPath: string): Promise<CouncilConfig> {
 
   assert(typeof parsed.councilName === "string" && parsed.councilName.length > 0, "councilName is required");
   assert(typeof parsed.purpose === "string" && parsed.purpose.length > 0, "purpose is required");
-  assert(typeof parsed.maxRounds === "number" && parsed.maxRounds > 0, "maxRounds must be > 0");
   assert(Array.isArray(parsed.members) && parsed.members.length >= 3, "members must include at least 3 entries");
   assert(parsed.members.length % 2 === 1, "members must be an odd count");
   assert(parsed.storage?.rootDir, "storage.rootDir is required");
@@ -56,9 +55,38 @@ export async function loadConfig(configPath: string): Promise<CouncilConfig> {
   assert(parsed.execution?.defaultExecutorProfile, "execution.defaultExecutorProfile is required");
   assert(typeof parsed.execution?.requireHumanApproval === "boolean", "execution.requireHumanApproval must be boolean");
 
+  if (parsed.maxRounds !== undefined) {
+    assert(typeof parsed.maxRounds === "number" && parsed.maxRounds > 0, "maxRounds must be > 0");
+  }
+
+  const defaultRounds =
+    typeof parsed.maxRounds === "number" && parsed.maxRounds > 0 ? parsed.maxRounds : 5;
+  const deliberationCandidate = parsed.deliberation as Partial<DeliberationConfig> | undefined;
+  if (deliberationCandidate !== undefined) {
+    assert(typeof deliberationCandidate === "object", "deliberation must be an object");
+    if (deliberationCandidate.highLevelRounds !== undefined) {
+      assert(
+        typeof deliberationCandidate.highLevelRounds === "number" &&
+          deliberationCandidate.highLevelRounds > 0,
+        "deliberation.highLevelRounds must be > 0"
+      );
+    }
+    if (deliberationCandidate.implementationRounds !== undefined) {
+      assert(
+        typeof deliberationCandidate.implementationRounds === "number" &&
+          deliberationCandidate.implementationRounds > 0,
+        "deliberation.implementationRounds must be > 0"
+      );
+    }
+  }
+
   const members = parsed.members as CouncilConfig["members"];
   const storage = parsed.storage as CouncilConfig["storage"];
   const execution = parsed.execution as CouncilConfig["execution"];
+  const deliberation: DeliberationConfig = {
+    highLevelRounds: deliberationCandidate?.highLevelRounds ?? defaultRounds,
+    implementationRounds: deliberationCandidate?.implementationRounds ?? defaultRounds
+  };
 
   for (const member of members) {
     assert(member.id, "each member requires id");
@@ -87,6 +115,7 @@ export async function loadConfig(configPath: string): Promise<CouncilConfig> {
     councilName: parsed.councilName,
     purpose: parsed.purpose,
     maxRounds: parsed.maxRounds,
+    deliberation,
     members,
     turnOrder: parsed.turnOrder,
     storage,

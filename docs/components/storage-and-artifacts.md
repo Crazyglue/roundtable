@@ -30,6 +30,7 @@ Persist all deliberation state so sessions are auditable and memory remains usef
 - Session event log writes happen incrementally in the recorder.
 - Member/council memory is updated once at session close from final outcomes and event-derived signals.
 - `*.json` memory files are canonical; `*.md` files are deterministic renderings of those JSON files.
+- Member prompt context is computed from active records scoped to the most recent 25 session IDs (older records remain stored but fade from prompt influence).
 - Session finalization writes resolved state and artifact pointers.
 
 ## Contributor Touchpoints

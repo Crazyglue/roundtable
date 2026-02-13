@@ -2,6 +2,8 @@ export type CouncilPhase = "DISCUSSION" | "SECONDING" | "VOTING" | "CLOSED";
 
 export type EventType =
   | "SESSION_STARTED"
+  | "PASS_STARTED"
+  | "PASS_COMPLETED"
   | "LEADER_ELECTION_BALLOT"
   | "LEADER_ELECTED"
   | "ROUND_STARTED"
@@ -155,10 +157,16 @@ export interface CouncilMemberConfig {
   model: ModelConfig;
 }
 
+export interface DeliberationConfig {
+  highLevelRounds: number;
+  implementationRounds: number;
+}
+
 export interface CouncilConfig {
   councilName: string;
   purpose: string;
-  maxRounds: number;
+  maxRounds?: number;
+  deliberation: DeliberationConfig;
   members: CouncilMemberConfig[];
   turnOrder?: string[];
   storage: {

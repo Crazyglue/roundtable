@@ -35,12 +35,32 @@ export interface TurnPromptInput {
   humanPrompt: string;
   transcript: string;
   memberMemory: string;
+  passId: "HIGH_LEVEL" | "IMPLEMENTATION";
+  passObjective: string;
+  priorPassResolution?: string;
   currentRound: number;
   maxRounds: number;
   turnsRemainingForSpeaker: number;
 }
 
 export function buildTurnPrompt(input: TurnPromptInput): string {
+  const passGuidance =
+    input.passId === "HIGH_LEVEL"
+      ? [
+          "Pass guidance:",
+          "- Focus on architecture direction, decision boundaries, and tradeoffs.",
+          "- Propose measurable acceptance criteria that implementation should satisfy.",
+          "- Surface known risks and unknowns that could cause later delivery, reliability, or cost issues.",
+          "- Keep technology picks provisional unless strict constraints force a choice."
+        ]
+      : [
+          "Pass guidance:",
+          "- Convert the plan into concrete implementation details and defaults.",
+          "- Specify APIs, data/resource model, scheduling behavior, coordination backend, and failure handling.",
+          "- Turn each known risk into concrete mitigations, detection signals, and contingency actions.",
+          "- Replace vague statements with explicit, defensible decisions."
+        ];
+
   const lastChance =
     input.turnsRemainingForSpeaker === 1
       ? "This is your last scheduled turn. Make your strongest argument now if needed."
@@ -50,6 +70,9 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     `Council Name: ${input.config.councilName}`,
     `Council Purpose: ${input.config.purpose}`,
     `Task Prompt: ${input.humanPrompt}`,
+    `Deliberation Pass: ${input.passId}`,
+    `Pass Objective: ${input.passObjective}`,
+    input.priorPassResolution ? `Prior pass resolution: ${input.priorPassResolution}` : undefined,
     "",
     `You are: ${input.member.name} (${input.member.id})`,
     `Role: ${input.member.role}`,
@@ -59,6 +82,8 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     `Round: ${input.currentRound}/${input.maxRounds}`,
     `Turns remaining for you (including this turn): ${input.turnsRemainingForSpeaker}`,
     lastChance,
+    "",
+    ...passGuidance,
     "",
     "Town-hall rules:",
     "- You may take exactly one action this turn: CONTRIBUTE, PASS, or CALL_VOTE.",
@@ -83,7 +108,9 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     "",
     "Your Memory:",
     input.memberMemory
-  ].join("\n");
+  ]
+    .filter((line): line is string => line !== undefined)
+    .join("\n");
 }
 
 export function buildLeaderElectionPrompt(
@@ -111,11 +138,15 @@ export function buildSecondingPrompt(
   config: CouncilConfig,
   member: CouncilMemberConfig,
   motion: Motion,
-  transcript: string
+  transcript: string,
+  passId: "HIGH_LEVEL" | "IMPLEMENTATION",
+  passObjective: string
 ): string {
   return [
     `Council Name: ${config.councilName}`,
     `You are ${member.name} (${member.id}).`,
+    `Deliberation Pass: ${passId}`,
+    `Pass Objective: ${passObjective}`,
     "",
     "A motion has been called. Decide whether to second it.",
     `Motion title: ${motion.motionTitle}`,
@@ -135,11 +166,15 @@ export function buildVotePrompt(
   config: CouncilConfig,
   member: CouncilMemberConfig,
   motion: Motion,
-  transcript: string
+  transcript: string,
+  passId: "HIGH_LEVEL" | "IMPLEMENTATION",
+  passObjective: string
 ): string {
   return [
     `Council Name: ${config.councilName}`,
     `You are ${member.name} (${member.id}).`,
+    `Deliberation Pass: ${passId}`,
+    `Pass Objective: ${passObjective}`,
     "",
     "A motion has been seconded. Cast a blind ballot.",
     `Motion title: ${motion.motionTitle}`,
@@ -199,7 +234,8 @@ export function buildDocumentationOutputPrompt(
   leader: CouncilMemberConfig,
   humanPrompt: string,
   transcript: string,
-  finalResolution: string
+  highLevelResolution: string,
+  implementationResolution: string
 ): string {
   return [
     `Council Name: ${config.councilName}`,
@@ -207,23 +243,25 @@ export function buildDocumentationOutputPrompt(
     `You are leader ${leader.name} (${leader.id}).`,
     "",
     `Original task: ${humanPrompt}`,
-    `Final resolution: ${finalResolution}`,
+    `High-level plan resolution: ${highLevelResolution}`,
+    `Implementation plan resolution: ${implementationResolution}`,
     "",
     "Generate a complete markdown document from the council discussion.",
     "Output markdown only. No JSON.",
-    "Include these sections exactly:",
+    "Do not assume scale targets that were not in the task.",
+    "List known risks explicitly. For each risk include: why it matters, likely trigger, impact, and mitigation.",
+    "Adapt section names to the task while keeping this minimum structure:",
     "1. # System Design",
     "2. ## Executive Summary",
-    "3. ## Requirements",
-    "4. ## Architecture Overview",
-    "5. ## Services and Deployment",
-    "6. ## Data Model and Storage",
-    "7. ## Networking and Security",
-    "8. ## Data Flows",
-    "9. ## Scaling Plan (Internal -> Public 1B+ users)",
-    "10. ## Reliability and Operations",
-    "11. ## Risks and Mitigations",
-    "12. ## Rollout Plan",
+    "3. ## High-Level Plan",
+    "4. ## Acceptance Criteria",
+    "5. ## Implementation Plan",
+    "6. ## Technology Decisions and Tradeoffs",
+    "7. ## API and Control Surface",
+    "8. ## Data and State Model",
+    "9. ## Known Risks and Mitigations",
+    "10. ## Failure Handling and Operations",
+    "11. ## Rollout Plan",
     "",
     "Transcript:",
     transcript

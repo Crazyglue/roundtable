@@ -17,13 +17,14 @@ Contributor docs: see [`docs/README.md`](docs/README.md).
 ## Protocol Rules Implemented
 
 1. Each member gets one turn per round.
-2. Max rounds are configurable (default shown: 5).
-3. Members are aware of remaining rounds/turns in prompts.
-4. `CALL_VOTE` pauses discussion for seconding.
-5. If no second, discussion resumes.
-6. If seconded, blind ballots are collected in parallel.
-7. Motion passes only with strict majority of full council.
-8. If no passing motion by round limit, session closes by limit.
+2. Sessions run in two passes: `HIGH_LEVEL` then `IMPLEMENTATION`.
+3. Rounds are configurable per pass (`deliberation.highLevelRounds` and `deliberation.implementationRounds`, defaults 5/5).
+4. Members are aware of pass objective and remaining rounds/turns in prompts.
+5. `CALL_VOTE` pauses discussion for seconding.
+6. If no second, discussion resumes.
+7. If seconded, blind ballots are collected in parallel.
+8. Motion passes only with strict majority of full council.
+9. If no passing motion by round limit, that pass closes by limit and the session continues to the next pass.
 
 ## Layout
 
@@ -94,6 +95,7 @@ Under `storage.memoryDir/`:
 - `<member_id>/AGENT.md`: member profile.
 - `<member_id>/MEMORY.json`: canonical structured member memory records + prompt context.
 - `<member_id>/MEMORY.md`: rendered memory snapshot from `MEMORY.json`.
+- Prompt context fades older session evidence after the most recent 25 sessions while retaining full history on disk.
 
 ## Notes
 

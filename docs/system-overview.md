@@ -13,7 +13,9 @@ This project runs a structured multi-agent "council" over a user prompt and can 
 2. Config is loaded and validated.
 3. On `run`, orchestrator starts a new session:
    - leader election
-   - round-robin discussion
+   - high-level pass (`HIGH_LEVEL`)
+   - implementation pass (`IMPLEMENTATION`)
+   - round-robin discussion within each pass
    - motion seconding
    - blind voting
    - finalization
@@ -38,6 +40,7 @@ flowchart TD
 ## Core Design Decisions
 
 - Odd council size, majority of full council for pass.
+- Two-pass deliberation (high-level then implementation) with independently configurable round limits.
 - Deterministic fallbacks for non-JSON model output.
 - Fail-fast for transport/auth/provider errors.
 - Human approval gate for execution handoff.

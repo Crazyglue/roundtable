@@ -27,6 +27,7 @@ Abstract LLM calls behind a single interface used by the orchestrator.
 ## Important Runtime Behavior
 
 - Codex responses do not accept `temperature`; the adapter omits it.
+- Orchestrator now passes per-member `temperature`/`maxTokens` to both JSON and text completions; provider-specific incompatibilities are handled in the adapter.
 - Provider errors are logged with provider/model/api/baseUrl context.
 
 ## Extension Points
