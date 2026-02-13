@@ -1,0 +1,45 @@
+{
+  "sessionId": "session_5120f098-ffb2-42b6-8fb3-0ffc72da6a76",
+  "councilName": "System Design Council",
+  "leaderId": "cust_outcomes",
+  "deliberation": {
+    "highLevelRounds": 5,
+    "implementationRounds": 5
+  },
+  "passResolutions": {
+    "highLevel": {
+      "passId": "HIGH_LEVEL",
+      "endedBy": "ROUND_LIMIT",
+      "finalResolution": "No majority high-level plan reached within configured rounds."
+    },
+    "implementation": {
+      "passId": "IMPLEMENTATION",
+      "endedBy": "MAJORITY_VOTE",
+      "finalResolution": "Plan adopted; proceed with phased rollout, implementation APIs, and verification suites.",
+      "winningMotion": {
+        "motionId": "motion_d31aa16b-6ea4-4fb9-a32e-eb2d5380c5c1",
+        "motionTitle": "Approve detailed implementation plan for distributed batch platform",
+        "motionText": "Approve the concrete plan covering REST/gRPC/WebSocket APIs, statestore schema, stateless quota-aware scheduler with 30s etcd leases and /v1/nodepools ETA, controller-led retries/checkpoints, agent staging/log relay, failure monitoring (quota drift, pool exhaustion, retry storms), and four rollout phases with CI chaos tests.",
+        "decisionIfPass": "Plan adopted; proceed with phased rollout, implementation APIs, and verification suites.",
+        "calledBy": "cust_outcomes",
+        "round": 5,
+        "turnIndex": 28
+      }
+    }
+  },
+  "endedBy": "MAJORITY_VOTE",
+  "finalResolution": "Plan adopted; proceed with phased rollout, implementation APIs, and verification suites.",
+  "requiresExecution": true,
+  "executionApproved": false,
+  "winningMotion": {
+    "motionId": "motion_d31aa16b-6ea4-4fb9-a32e-eb2d5380c5c1",
+    "motionTitle": "Approve detailed implementation plan for distributed batch platform",
+    "motionText": "Approve the concrete plan covering REST/gRPC/WebSocket APIs, statestore schema, stateless quota-aware scheduler with 30s etcd leases and /v1/nodepools ETA, controller-led retries/checkpoints, agent staging/log relay, failure monitoring (quota drift, pool exhaustion, retry storms), and four rollout phases with CI chaos tests.",
+    "decisionIfPass": "Plan adopted; proceed with phased rollout, implementation APIs, and verification suites.",
+    "calledBy": "cust_outcomes",
+    "round": 5,
+    "turnIndex": 28
+  },
+  "outputType": "documentation",
+  "outputDocumentFile": ".council/sessions/session_5120f098-ffb2-42b6-8fb3-0ffc72da6a76/documentation.md"
+}
