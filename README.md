@@ -1,4 +1,4 @@
-# LLM Council (TypeScript Scaffold)
+# Roundtable (TypeScript Scaffold)
 
 A self-hosted council runtime for structured multi-agent deliberation with:
 
@@ -12,7 +12,7 @@ A self-hosted council runtime for structured multi-agent deliberation with:
 - Final leader summary entry.
 - Execution handoff artifact with human-approval gating.
 
-Contributor docs: see [`/Users/eric/code/llm-council/docs/README.md`](/Users/eric/code/llm-council/docs/README.md).
+Contributor docs: see [`docs/README.md`](docs/README.md).
 
 ## Protocol Rules Implemented
 
@@ -27,12 +27,12 @@ Contributor docs: see [`/Users/eric/code/llm-council/docs/README.md`](/Users/eri
 
 ## Layout
 
-- `/Users/eric/code/llm-council/src/index.ts`: CLI entrypoint.
-- `/Users/eric/code/llm-council/src/council/orchestrator.ts`: state machine and orchestration loop.
-- `/Users/eric/code/llm-council/src/council/prompts.ts`: strict prompt contracts + response normalizers.
-- `/Users/eric/code/llm-council/src/models/*`: model adapter abstraction and providers.
-- `/Users/eric/code/llm-council/src/storage/*`: memory/session persistence.
-- `/Users/eric/code/llm-council/council.config.example.json`: starter config.
+- `src/index.ts`: CLI entrypoint.
+- `src/council/orchestrator.ts`: state machine and orchestration loop.
+- `src/council/prompts.ts`: strict prompt contracts + response normalizers.
+- `src/models/*`: model adapter abstraction and providers.
+- `src/storage/*`: memory/session persistence.
+- `council.config.example.json`: starter config.
 
 ## Run
 
@@ -108,7 +108,7 @@ Under `storage.memoryDir/`:
   - `model.auth.method = "oauth-device-code"` (interactive OAuth device flow + token cache)
   - `model.auth.method = "command"` (run a helper command that returns a token on stdout)
 - Onboarding writes credentials to `.council/credentials.json` (gitignored) and rewrites config auth blocks to `credential-ref`.
-- OAuth tokens are cached by default at `~/.llm-council/tokens.json` (override with `tokenStorePath`).
+- OAuth tokens are cached by default at `~/.roundtable/tokens.json` (override with `tokenStorePath`).
 - Direct OpenAI/Anthropic API usage remains key-oriented; OAuth is mainly useful for compatible gateways or broker/helper flows.
 - This scaffold does not execute code changes yet. It emits execution handoff data and enforces approval gating.
 

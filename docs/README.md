@@ -4,12 +4,12 @@ This folder contains high-level architecture and component docs for contributors
 
 ## Components
 
-- [System Overview](/Users/eric/code/llm-council/docs/system-overview.md)
-- [CLI and Config](/Users/eric/code/llm-council/docs/components/cli-and-config.md)
-- [Council Engine](/Users/eric/code/llm-council/docs/components/council-engine.md)
-- [Model Runtime](/Users/eric/code/llm-council/docs/components/model-runtime.md)
-- [Auth and Onboarding](/Users/eric/code/llm-council/docs/components/auth-and-onboarding.md)
-- [Storage and Artifacts](/Users/eric/code/llm-council/docs/components/storage-and-artifacts.md)
+- [System Overview](./system-overview.md)
+- [CLI and Config](./components/cli-and-config.md)
+- [Council Engine](./components/council-engine.md)
+- [Model Runtime](./components/model-runtime.md)
+- [Auth and Onboarding](./components/auth-and-onboarding.md)
+- [Storage and Artifacts](./components/storage-and-artifacts.md)
 
 ## Suggested Reading Order
 

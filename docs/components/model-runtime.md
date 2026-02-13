@@ -6,9 +6,9 @@ Abstract LLM calls behind a single interface used by the orchestrator.
 
 ## Key Files
 
-- `/Users/eric/code/llm-council/src/models/modelClient.ts`
-- `/Users/eric/code/llm-council/src/models/factory.ts`
-- `/Users/eric/code/llm-council/src/models/piAiClient.ts`
+- `src/models/modelClient.ts`
+- `src/models/factory.ts`
+- `src/models/piAiClient.ts`
 
 ## Current Implementation
 
@@ -33,4 +33,4 @@ Abstract LLM calls behind a single interface used by the orchestrator.
 
 - Add provider mappings in `resolveApi()`.
 - Add provider-specific options in `completeText()` (conditional by API).
-- Adjust JSON extraction behavior in `/Users/eric/code/llm-council/src/utils.ts`.
+- Adjust JSON extraction behavior in `src/utils.ts`.

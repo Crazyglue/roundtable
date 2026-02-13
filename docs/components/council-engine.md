@@ -12,8 +12,8 @@ Run the council protocol from start to finish, including:
 
 ## Key Files
 
-- `/Users/eric/code/llm-council/src/council/orchestrator.ts`
-- `/Users/eric/code/llm-council/src/council/prompts.ts`
+- `src/council/orchestrator.ts`
+- `src/council/prompts.ts`
 
 ## Protocol
 

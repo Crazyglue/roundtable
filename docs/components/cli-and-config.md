@@ -10,10 +10,10 @@ Provide a stable entrypoint for users and contributors:
 
 ## Key Files
 
-- `/Users/eric/code/llm-council/src/index.ts`
-- `/Users/eric/code/llm-council/src/config.ts`
-- `/Users/eric/code/llm-council/src/types.ts`
-- `/Users/eric/code/llm-council/council.config.example.json`
+- `src/index.ts`
+- `src/config.ts`
+- `src/types.ts`
+- `council.config.example.json`
 
 ## Commands
 

@@ -6,8 +6,8 @@ Persist all deliberation state so sessions are auditable and memory can accumula
 
 ## Key Files
 
-- `/Users/eric/code/llm-council/src/storage/memoryStore.ts`
-- `/Users/eric/code/llm-council/src/storage/sessionRecorder.ts`
+- `src/storage/memoryStore.ts`
+- `src/storage/sessionRecorder.ts`
 
 ## Directory Layout
 

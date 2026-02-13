@@ -72,11 +72,15 @@ function nowIso(): string {
 }
 
 export function defaultCredentialStorePath(): string {
-  return process.env.LLM_COUNCIL_CREDENTIAL_STORE ?? path.join(process.cwd(), ".council", "credentials.json");
+  return (
+    process.env.ROUNDTABLE_CREDENTIAL_STORE ??
+    process.env.LLM_COUNCIL_CREDENTIAL_STORE ??
+    path.join(process.cwd(), ".council", "credentials.json")
+  );
 }
 
 function defaultLegacyTokenStorePath(): string {
-  return path.join(os.homedir(), ".llm-council", "tokens.json");
+  return path.join(os.homedir(), ".roundtable", "tokens.json");
 }
 
 function buildCacheKey(config: ModelConfig, auth: ModelAuthConfig): string {
@@ -96,7 +100,7 @@ function legacyTokenStorePathFor(auth: ModelAuthConfig): string {
   if (auth.method === "command" && auth.tokenStorePath) {
     return auth.tokenStorePath;
   }
-  return process.env.LLM_COUNCIL_TOKEN_STORE ?? defaultLegacyTokenStorePath();
+  return process.env.ROUNDTABLE_TOKEN_STORE ?? process.env.LLM_COUNCIL_TOKEN_STORE ?? defaultLegacyTokenStorePath();
 }
 
 async function loadLegacyTokenStore(filePath: string): Promise<LegacyTokenStore> {

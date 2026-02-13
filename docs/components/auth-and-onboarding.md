@@ -6,9 +6,9 @@ Provide contributor-friendly credential setup and runtime credential resolution.
 
 ## Key Files
 
-- `/Users/eric/code/llm-council/src/onboarding/onboard.ts`
-- `/Users/eric/code/llm-council/src/auth/credentials.ts`
-- `/Users/eric/code/llm-council/.council/credentials.json` (runtime, gitignored)
+- `src/onboarding/onboard.ts`
+- `src/auth/credentials.ts`
+- `.council/credentials.json` (runtime, gitignored)
 
 ## Auth Modes
 
