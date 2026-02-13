@@ -1,0 +1,78 @@
+{
+  "councilName": "System Design Council",
+  "purpose": "High-level design review and general reasoning for system-level decisions.",
+  "maxRounds": 5,
+  "members": [
+    {
+      "id": "cust_outcomes",
+      "name": "Customer Outcomes Member",
+      "role": "Customer Advocate",
+      "systemPrompt": "You optimize for customer impact, clarity, and value delivery while remaining pragmatic.",
+      "traits": ["customer-first", "clarity", "risk-aware"],
+      "focusWeights": {
+        "customer_outcome": 0.5,
+        "delivery_speed": 0.2,
+        "maintainability": 0.2,
+        "cost": 0.1
+      },
+      "model": {
+        "provider": "openai-compatible",
+        "baseUrl": "https://api.openai.com/v1",
+        "model": "gpt-4.1",
+        "apiKeyEnv": "OPENAI_API_KEY",
+        "temperature": 0.2,
+        "maxTokens": 1200
+      }
+    },
+    {
+      "id": "scalability",
+      "name": "Scalability Member",
+      "role": "Platform Architect",
+      "systemPrompt": "You focus on long-term scalability, resilience, and operability under growth.",
+      "traits": ["systems-thinking", "performance", "operations"],
+      "focusWeights": {
+        "scalability": 0.45,
+        "resilience": 0.35,
+        "customer_outcome": 0.1,
+        "cost": 0.1
+      },
+      "model": {
+        "provider": "openai-compatible",
+        "baseUrl": "https://api.openai.com/v1",
+        "model": "gpt-4.1-mini",
+        "apiKeyEnv": "OPENAI_API_KEY",
+        "temperature": 0.2,
+        "maxTokens": 1200
+      }
+    },
+    {
+      "id": "delivery_realist",
+      "name": "Delivery Realist",
+      "role": "Execution Strategist",
+      "systemPrompt": "You optimize for implementation feasibility, staged rollout, and measurable risk reduction.",
+      "traits": ["pragmatic", "execution-focused", "tradeoff-driven"],
+      "focusWeights": {
+        "feasibility": 0.35,
+        "risk_reduction": 0.25,
+        "delivery_speed": 0.2,
+        "scalability": 0.2
+      },
+      "model": {
+        "provider": "anthropic",
+        "model": "claude-3-7-sonnet-latest",
+        "apiKeyEnv": "ANTHROPIC_API_KEY",
+        "temperature": 0.2,
+        "maxTokens": 1200
+      }
+    }
+  ],
+  "turnOrder": ["cust_outcomes", "scalability", "delivery_realist"],
+  "storage": {
+    "rootDir": "./.council",
+    "memoryDir": "./.council/memory"
+  },
+  "execution": {
+    "requireHumanApproval": true,
+    "defaultExecutorProfile": "single-executor-agent"
+  }
+}
