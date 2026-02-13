@@ -60,7 +60,15 @@ npm run build
 npm run start -- run --config council.config.json --prompt "Review the architecture direction for multi-tenant event ingestion."
 ```
 
-5. Optional execution approval:
+5. Optional structured output artifact:
+
+```bash
+npm run start -- run --config council.config.json --output-type documentation --prompt "Create a system design for a tiny-url app"
+# alternatively inline in prompt:
+npm run start -- run --config council.config.json --prompt "[output:documentation] Create a system design for a tiny-url app"
+```
+
+6. Optional execution approval:
 
 ```bash
 npm run start -- run --config council.config.json --prompt "..." --approve-execution
@@ -74,6 +82,7 @@ Under `storage.rootDir/sessions/<session_id>/`:
 - `events.json`: structured event log.
 - `session.json`: final state payload.
 - `leader-summary.md`: final leader entry.
+- `documentation.md` (when `outputType=documentation`): full markdown deliverable generated from the discussion.
 - `execution-handoff.json` (when needed): executor payload with approval status.
 
 Under `storage.memoryDir/`:

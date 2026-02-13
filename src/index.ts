@@ -2,6 +2,7 @@ import path from "node:path";
 import { loadConfig } from "./config.js";
 import { CouncilOrchestrator } from "./council/orchestrator.js";
 import { runOnboarding } from "./onboarding/onboard.js";
+import { CouncilOutputType } from "./types.js";
 
 interface CliArgs {
   command: string;
@@ -9,6 +10,7 @@ interface CliArgs {
   credentialStorePath?: string;
   prompt: string;
   approveExecution: boolean;
+  outputType: CouncilOutputType;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -29,12 +31,23 @@ function parseArgs(argv: string[]): CliArgs {
     }
   }
 
+  const outputTypeFlag = map.get("--output-type");
+  const outputType: CouncilOutputType =
+    outputTypeFlag === "documentation" ? "documentation" : "none";
+  const promptValue = map.get("--prompt") ?? "";
+  const inlineOutputTypeMatch = promptValue.match(/\[output:(documentation)\]/i);
+  const inlineOutputType = inlineOutputTypeMatch?.[1]?.toLowerCase() as
+    | "documentation"
+    | undefined;
+  const cleanedPrompt = promptValue.replace(/\[output:(documentation)\]/ig, "").trim();
+
   return {
     command: command ?? "run",
     configPath: map.get("--config") ?? "council.config.json",
     credentialStorePath: map.get("--credentials"),
-    prompt: map.get("--prompt") ?? "",
-    approveExecution: flags.has("--approve-execution")
+    prompt: cleanedPrompt,
+    approveExecution: flags.has("--approve-execution"),
+    outputType: inlineOutputType ?? outputType
   };
 }
 
@@ -48,6 +61,7 @@ function usage(): string {
     "  --config <path>            Path to council config JSON",
     "  --credentials <path>       Path to credential store JSON",
     "  --prompt <text>            Human task prompt",
+    "  --output-type <type>       Output artifact type (documentation)",
     "  --approve-execution        Mark execution handoff as approved"
   ].join("\n");
 }
@@ -74,7 +88,8 @@ async function main(): Promise<void> {
   const orchestrator = new CouncilOrchestrator(config);
   const result = await orchestrator.run({
     humanPrompt: args.prompt.trim(),
-    approveExecution: args.approveExecution
+    approveExecution: args.approveExecution,
+    outputType: args.outputType
   });
 
   const cwd = process.cwd();
@@ -90,6 +105,7 @@ async function main(): Promise<void> {
   console.log(`- finalResolution: ${result.finalResolution}`);
   console.log(`- requiresExecution: ${result.requiresExecution}`);
   console.log(`- executionApproved: ${result.executionApproved}`);
+  console.log(`- outputType: ${result.outputType}`);
   console.log("- artifacts:");
   console.log(`  - transcript: ${maybeRelative(result.artifacts.transcriptFile)}`);
   console.log(`  - events: ${maybeRelative(result.artifacts.eventsFile)}`);
@@ -98,10 +114,19 @@ async function main(): Promise<void> {
   if (result.artifacts.executionHandoffFile) {
     console.log(`  - executionHandoff: ${maybeRelative(result.artifacts.executionHandoffFile)}`);
   }
+  if (result.artifacts.outputDocumentFile) {
+    console.log(`  - outputDocument: ${maybeRelative(result.artifacts.outputDocumentFile)}`);
+  }
 }
 
 main().catch((error) => {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(`Error: ${message}`);
+  if (error instanceof Error) {
+    console.error(`Error: ${error.message}`);
+    if (error.stack) {
+      console.error(error.stack);
+    }
+  } else {
+    console.error(`Error: ${String(error)}`);
+  }
   process.exitCode = 1;
 });

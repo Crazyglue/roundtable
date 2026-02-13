@@ -4,7 +4,8 @@ import {
   type AssistantMessage,
   type Context,
   type Message,
-  type Model
+  type Model,
+  type ProviderStreamOptions
 } from "@mariozechner/pi-ai";
 import { resolveModelCredential } from "../auth/credentials.js";
 import { ModelConfig } from "../types.js";
@@ -119,6 +120,13 @@ function toPiAiContext(messages: ChatMessage[], model: Model<Api>): Context {
 }
 
 function extractResponseText(message: AssistantMessage): string {
+  if (message.stopReason === "error" || message.stopReason === "aborted") {
+    const reason = message.errorMessage
+      ? `pi-ai completion failed (${message.stopReason}): ${message.errorMessage}`
+      : `pi-ai completion failed (${message.stopReason})`;
+    throw new Error(reason);
+  }
+
   const text = message.content
     .filter((part) => part.type === "text")
     .map((part) => part.text)
@@ -148,7 +156,10 @@ function extractResponseText(message: AssistantMessage): string {
     return JSON.stringify(toolCalls);
   }
 
-  throw new Error("pi-ai response did not contain text/thinking/tool-call content.");
+  const blockTypes = message.content.map((part) => part.type);
+  throw new Error(
+    `pi-ai response did not contain text/thinking/tool-call content (stopReason=${message.stopReason}, blocks=${JSON.stringify(blockTypes)}, errorMessage=${message.errorMessage ?? "none"}).`
+  );
 }
 
 export class PiAiClient implements ModelClient {
@@ -165,14 +176,32 @@ export class PiAiClient implements ModelClient {
   }
 
   async completeText(messages: ChatMessage[], options?: CompletionOptions): Promise<string> {
-    const apiKey = await resolveModelCredential(this.config);
-    const context = toPiAiContext(messages, this.model);
-    const response = await complete(this.model, context, {
-      apiKey,
-      temperature: options?.temperature ?? this.defaultTemperature,
-      maxTokens: options?.maxTokens ?? this.defaultMaxTokens,
-      headers: this.config.headers
-    });
-    return extractResponseText(response);
+    try {
+      const apiKey = await resolveModelCredential(this.config);
+      const context = toPiAiContext(messages, this.model);
+      const requestOptions: ProviderStreamOptions = {
+        apiKey,
+        maxTokens: options?.maxTokens ?? this.defaultMaxTokens,
+        headers: this.config.headers
+      };
+
+      // Codex responses endpoint rejects temperature.
+      if (this.model.api !== "openai-codex-responses") {
+        requestOptions.temperature = options?.temperature ?? this.defaultTemperature;
+      }
+
+      const response = await complete(this.model, context, requestOptions);
+      return extractResponseText(response);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("[model] request failed", {
+        provider: this.config.provider,
+        api: this.model.api,
+        model: this.model.id,
+        baseUrl: this.model.baseUrl,
+        message
+      });
+      throw error;
+    }
   }
 }

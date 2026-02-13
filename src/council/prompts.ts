@@ -1,4 +1,5 @@
 import {
+  CouncilOutputType,
   CouncilConfig,
   CouncilMemberConfig,
   LeaderElectionBallot,
@@ -8,6 +9,25 @@ import {
   VoteResponse
 } from "../types.js";
 import { Motion } from "../types.js";
+
+interface ParseErrorEnvelope {
+  __errorType?: string;
+  message?: string;
+  raw?: string;
+}
+
+function getParseErrorMessage(value: unknown): string | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const candidate = value as ParseErrorEnvelope;
+  if (candidate.__errorType !== "json_parse_error") {
+    return undefined;
+  }
+  return typeof candidate.message === "string" && candidate.message.trim()
+    ? candidate.message.trim()
+    : "Model response was not valid JSON.";
+}
 
 export interface TurnPromptInput {
   config: CouncilConfig;
@@ -45,6 +65,12 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     "- If you CONTRIBUTE, provide your argument to influence the council.",
     "- If you PASS, provide a brief reason and optional note for the record.",
     "- If you CALL_VOTE, provide a clear motion and decision statement.",
+    "",
+    "Hard output limits:",
+    "- CONTRIBUTE.message <= 1200 characters.",
+    "- PASS.reason <= 220 characters; PASS.note <= 220 characters.",
+    "- CALL_VOTE.motionTitle <= 140 characters; motionText <= 600 characters; decisionIfPass <= 300 characters.",
+    "- Do not include any field beyond the schema.",
     "",
     "Output MUST be valid JSON only. No markdown.",
     "Schemas:",
@@ -137,8 +163,14 @@ export function buildLeaderSummaryPrompt(
   leader: CouncilMemberConfig,
   transcript: string,
   endedBy: string,
-  finalResolution: string
+  finalResolution: string,
+  outputType: CouncilOutputType
 ): string {
+  const summaryConstraint =
+    outputType === "documentation"
+      ? '- summaryMarkdown must be a short description of the documentation file (1-2 sentences, <= 220 chars).'
+      : "- summaryMarkdown <= 1800 characters.";
+
   return [
     `Council Name: ${config.councilName}`,
     `Purpose: ${config.purpose}`,
@@ -148,9 +180,50 @@ export function buildLeaderSummaryPrompt(
     `Final resolution: ${finalResolution}`,
     "",
     "Write the final session entry as JSON only.",
+    "Keep it concise. Avoid long prose and keep fields bounded.",
+    "Hard limits:",
+    summaryConstraint,
+    "- finalResolution <= 300 characters.",
+    "- If executionBrief is present: objective <= 240 chars; each list has max 5 items; each item <= 160 chars.",
     "Schema:",
     '{"summaryMarkdown":"...","finalResolution":"...","requiresExecution":true,"executionBrief":{"objective":"...","recommendedExecutorProfile":"...","steps":["..."],"risks":["..."],"acceptanceCriteria":["..."]}}',
     'If no execution is needed, set "requiresExecution" to false and omit executionBrief.',
+    "",
+    "Transcript:",
+    transcript
+  ].join("\n");
+}
+
+export function buildDocumentationOutputPrompt(
+  config: CouncilConfig,
+  leader: CouncilMemberConfig,
+  humanPrompt: string,
+  transcript: string,
+  finalResolution: string
+): string {
+  return [
+    `Council Name: ${config.councilName}`,
+    `Purpose: ${config.purpose}`,
+    `You are leader ${leader.name} (${leader.id}).`,
+    "",
+    `Original task: ${humanPrompt}`,
+    `Final resolution: ${finalResolution}`,
+    "",
+    "Generate a complete markdown document from the council discussion.",
+    "Output markdown only. No JSON.",
+    "Include these sections exactly:",
+    "1. # System Design",
+    "2. ## Executive Summary",
+    "3. ## Requirements",
+    "4. ## Architecture Overview",
+    "5. ## Services and Deployment",
+    "6. ## Data Model and Storage",
+    "7. ## Networking and Security",
+    "8. ## Data Flows",
+    "9. ## Scaling Plan (Internal -> Public 1B+ users)",
+    "10. ## Reliability and Operations",
+    "11. ## Risks and Mitigations",
+    "12. ## Rollout Plan",
     "",
     "Transcript:",
     transcript
@@ -179,6 +252,15 @@ export function buildMemberSummaryPrompt(
 }
 
 export function normalizeTurnAction(value: unknown): TurnAction {
+  const parseError = getParseErrorMessage(value);
+  if (parseError) {
+    return {
+      action: "PASS",
+      reason: `Model JSON parse error: ${parseError}`,
+      note: "Auto-converted to PASS to preserve deterministic flow."
+    };
+  }
+
   const candidate = value as Partial<TurnAction>;
   if (candidate.action === "CONTRIBUTE" && typeof candidate.message === "string" && candidate.message.trim()) {
     return { action: "CONTRIBUTE", message: candidate.message.trim() };
@@ -214,6 +296,11 @@ export function normalizeTurnAction(value: unknown): TurnAction {
 }
 
 export function normalizeSecondingResponse(value: unknown): SecondingResponse {
+  const parseError = getParseErrorMessage(value);
+  if (parseError) {
+    return { second: false, rationale: `Model JSON parse error: ${parseError}` };
+  }
+
   const candidate = value as Partial<SecondingResponse>;
   if (typeof candidate.second !== "boolean") {
     return { second: false, rationale: "Invalid response format." };
@@ -225,6 +312,11 @@ export function normalizeSecondingResponse(value: unknown): SecondingResponse {
 }
 
 export function normalizeVoteResponse(value: unknown): VoteResponse {
+  const parseError = getParseErrorMessage(value);
+  if (parseError) {
+    return { ballot: "ABSTAIN", rationale: `Model JSON parse error: ${parseError}` };
+  }
+
   const candidate = value as Partial<VoteResponse>;
   const ballot = candidate.ballot;
   if (ballot !== "YES" && ballot !== "NO" && ballot !== "ABSTAIN") {
@@ -240,6 +332,15 @@ export function normalizeLeaderElectionBallot(
   value: unknown,
   memberIds: Set<string>
 ): LeaderElectionBallot {
+  const parseError = getParseErrorMessage(value);
+  if (parseError) {
+    const fallbackCandidateId = Array.from(memberIds)[0] ?? "";
+    return {
+      candidateId: fallbackCandidateId,
+      rationale: `Model JSON parse error: ${parseError}`
+    };
+  }
+
   const candidate = value as Partial<LeaderElectionBallot>;
   const fallbackCandidateId = Array.from(memberIds)[0] ?? "";
   if (!candidate.candidateId || !memberIds.has(candidate.candidateId)) {
@@ -257,7 +358,24 @@ export function normalizeLeaderElectionBallot(
   };
 }
 
-export function normalizeLeaderSummary(value: unknown, fallbackResolution: string): LeaderSummary {
+export function normalizeLeaderSummary(
+  value: unknown,
+  fallbackResolution: string,
+  outputType: CouncilOutputType
+): LeaderSummary {
+  const parseError = getParseErrorMessage(value);
+  if (parseError) {
+    const summaryMarkdown =
+      outputType === "documentation"
+        ? `See session documentation for full details. Resolution: ${fallbackResolution}`.slice(0, 220)
+        : `- Leader summary parse error: ${parseError}\n- Final resolution: ${fallbackResolution}`;
+    return {
+      summaryMarkdown,
+      finalResolution: fallbackResolution,
+      requiresExecution: false
+    };
+  }
+
   const candidate = value as Partial<LeaderSummary>;
   if (typeof candidate.summaryMarkdown !== "string" || !candidate.summaryMarkdown.trim()) {
     return {
@@ -268,7 +386,10 @@ export function normalizeLeaderSummary(value: unknown, fallbackResolution: strin
   }
 
   return {
-    summaryMarkdown: candidate.summaryMarkdown.trim(),
+    summaryMarkdown:
+      outputType === "documentation"
+        ? candidate.summaryMarkdown.trim().slice(0, 220)
+        : candidate.summaryMarkdown.trim(),
     finalResolution:
       typeof candidate.finalResolution === "string" && candidate.finalResolution.trim()
         ? candidate.finalResolution.trim()

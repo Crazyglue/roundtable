@@ -1,12 +1,17 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { buildModelClient } from "../models/factory.js";
-import { completeJson, ModelClient } from "../models/modelClient.js";
+import {
+  completeJson,
+  JsonResponseParseError,
+  ModelClient
+} from "../models/modelClient.js";
 import {
   Ballot,
   CouncilConfig,
   CouncilEvent,
   CouncilMemberConfig,
+  CouncilOutputType,
   CouncilPhase,
   LeaderElectionBallot,
   LeaderSummary,
@@ -20,6 +25,7 @@ import { makeId, nowIso, sortByStableOrder, toJsonString } from "../utils.js";
 import { MemoryStore } from "../storage/memoryStore.js";
 import { SessionRecorder } from "../storage/sessionRecorder.js";
 import {
+  buildDocumentationOutputPrompt,
   buildLeaderElectionPrompt,
   buildLeaderSummaryPrompt,
   buildMemberSummaryPrompt,
@@ -45,6 +51,7 @@ export class CouncilOrchestrator {
   }
 
   async run(options: SessionRunOptions): Promise<SessionResult> {
+    const outputType: CouncilOutputType = options.outputType ?? "none";
     await mkdir(this.config.storage.rootDir, { recursive: true });
     await mkdir(this.config.storage.memoryDir, { recursive: true });
 
@@ -85,11 +92,12 @@ export class CouncilOrchestrator {
       humanPrompt: options.humanPrompt,
       maxRounds: this.config.maxRounds,
       votingRule: "majority_of_full_council",
-      blindVoting: true
+      blindVoting: true,
+      outputType
     });
 
     const turnOrder = this.resolveTurnOrder();
-    const leaderId = await this.electLeader(recorder, appendEvent);
+    const leaderId = await this.electLeader(sessionId, recorder, appendEvent);
     const leader = this.requireMember(leaderId);
     let closed = false;
     let endedBy: SessionResult["endedBy"] = "ROUND_LIMIT";
@@ -125,7 +133,18 @@ export class CouncilOrchestrator {
           turnsRemainingForSpeaker
         });
 
-        const actionRaw = await this.completeJsonSafe<TurnAction>(client, speaker.systemPrompt, turnPrompt);
+        const actionRaw = await this.completeJsonSafe<TurnAction>(
+          client,
+          speaker.systemPrompt,
+          turnPrompt,
+          {
+            stage: "turn_action",
+            sessionId,
+            memberId: speaker.id,
+            round,
+            turnIndex
+          }
+        );
         const action = normalizeTurnAction(actionRaw);
         await appendEvent("TURN_ACTION", round, action, speaker.id);
 
@@ -162,7 +181,18 @@ export class CouncilOrchestrator {
           nonCallerIds.map(async (memberId) => {
             const member = this.requireMember(memberId);
             const secondingPrompt = buildSecondingPrompt(this.config, member, motion, recorder.getTranscript());
-            const secondRaw = await this.completeJsonSafe(this.requireClient(memberId), member.systemPrompt, secondingPrompt);
+            const secondRaw = await this.completeJsonSafe(
+              this.requireClient(memberId),
+              member.systemPrompt,
+              secondingPrompt,
+              {
+                stage: "motion_seconding",
+                sessionId,
+                memberId,
+                round,
+                turnIndex
+              }
+            );
             return { memberId, response: normalizeSecondingResponse(secondRaw) };
           })
         );
@@ -192,7 +222,14 @@ export class CouncilOrchestrator {
             const voteRaw = await this.completeJsonSafe<VoteResponse>(
               this.requireClient(memberId),
               member.systemPrompt,
-              votePrompt
+              votePrompt,
+              {
+                stage: "motion_vote",
+                sessionId,
+                memberId,
+                round,
+                turnIndex
+              }
             );
             return { memberId, vote: normalizeVoteResponse(voteRaw) };
           })
@@ -236,18 +273,74 @@ export class CouncilOrchestrator {
       leader,
       recorder.getTranscript(),
       endedBy,
-      finalResolution
+      finalResolution,
+      outputType
     );
 
     const leaderSummaryRaw = await this.completeJsonSafe<LeaderSummary>(
       this.requireClient(leaderId),
       leader.systemPrompt,
-      leaderSummaryPrompt
+      leaderSummaryPrompt,
+      {
+        stage: "leader_summary",
+        sessionId,
+        memberId: leaderId,
+        round: this.config.maxRounds,
+        turnIndex
+      }
     );
-    const leaderSummary = normalizeLeaderSummary(leaderSummaryRaw, finalResolution);
+    const leaderSummary = normalizeLeaderSummary(leaderSummaryRaw, finalResolution, outputType);
 
     await appendEvent("LEADER_SUMMARY", this.config.maxRounds, leaderSummary, leaderId);
     await recorder.writeLeaderSummary(leaderSummary.summaryMarkdown);
+
+    let outputDocumentFile: string | undefined;
+    if (outputType === "documentation") {
+      outputDocumentFile = path.join(recorder.getArtifacts().sessionDir, "documentation.md");
+      try {
+        const docPrompt = buildDocumentationOutputPrompt(
+          this.config,
+          leader,
+          options.humanPrompt,
+          recorder.getTranscript(),
+          leaderSummary.finalResolution
+        );
+        const documentation = await this.requireClient(leaderId).completeText(
+          [
+            { role: "system", content: leader.systemPrompt },
+            { role: "user", content: docPrompt }
+          ],
+          { temperature: leader.model.temperature, maxTokens: leader.model.maxTokens }
+        );
+        await writeFile(outputDocumentFile, `${documentation.trim()}\n`, "utf8");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error("[council] documentation artifact generation failed", {
+          sessionId,
+          leaderId,
+          message
+        });
+        const fallback = [
+          "# System Design",
+          "",
+          "## Executive Summary",
+          leaderSummary.finalResolution,
+          "",
+          "## Notes",
+          "Generated fallback document due to documentation generation error.",
+          "",
+          "## Session Transcript",
+          recorder.getTranscript()
+        ].join("\n");
+        await writeFile(outputDocumentFile, `${fallback}\n`, "utf8");
+      }
+      await appendEvent(
+        "OUTPUT_ARTIFACT_WRITTEN",
+        this.config.maxRounds,
+        { outputType, file: outputDocumentFile },
+        leaderId
+      );
+    }
 
     await Promise.all(
       this.config.members.map(async (member) => {
@@ -258,7 +351,16 @@ export class CouncilOrchestrator {
             { role: "user", content: summaryPrompt }
           ],
           { temperature: member.model.temperature, maxTokens: member.model.maxTokens }
-        );
+        ).catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error("[council] member summary generation failed", {
+            sessionId,
+            memberId: member.id,
+            memberName: member.name,
+            message
+          });
+          throw error;
+        });
         await memoryStore.appendSessionSummary(member.id, sessionId, content);
       })
     );
@@ -294,7 +396,8 @@ export class CouncilOrchestrator {
         endedBy,
         finalResolution: leaderSummary.finalResolution,
         requiresExecution: leaderSummary.requiresExecution,
-        executionApproved
+        executionApproved,
+        outputType
       }
     );
 
@@ -306,7 +409,9 @@ export class CouncilOrchestrator {
       finalResolution: leaderSummary.finalResolution,
       requiresExecution: leaderSummary.requiresExecution,
       executionApproved,
-      winningMotion
+      winningMotion,
+      outputType,
+      outputDocumentFile
     });
 
     return {
@@ -316,14 +421,17 @@ export class CouncilOrchestrator {
       finalResolution: leaderSummary.finalResolution,
       requiresExecution: leaderSummary.requiresExecution,
       executionApproved,
+      outputType,
       artifacts: {
         ...artifacts,
-        executionHandoffFile
+        executionHandoffFile,
+        outputDocumentFile
       }
     };
   }
 
   private async electLeader(
+    sessionId: string,
     recorder: SessionRecorder,
     appendEvent: (
       type: CouncilEvent["type"],
@@ -339,7 +447,13 @@ export class CouncilOrchestrator {
         const raw = await this.completeJsonSafe<LeaderElectionBallot>(
           this.requireClient(member.id),
           member.systemPrompt,
-          prompt
+          prompt,
+          {
+            stage: "leader_election",
+            sessionId,
+            memberId: member.id,
+            round: 0
+          }
         );
         const normalized = normalizeLeaderElectionBallot(raw, memberIds);
         await appendEvent("LEADER_ELECTION_BALLOT", 0, normalized, member.id);
@@ -387,7 +501,14 @@ export class CouncilOrchestrator {
   private async completeJsonSafe<T>(
     client: ModelClient,
     systemPrompt: string,
-    userPrompt: string
+    userPrompt: string,
+    context?: {
+      stage: string;
+      memberId?: string;
+      round?: number;
+      turnIndex?: number;
+      sessionId?: string;
+    }
   ): Promise<T> {
     try {
       return await completeJson<T>(
@@ -399,8 +520,34 @@ export class CouncilOrchestrator {
         {}
       );
     } catch (error) {
-      // Deterministic fallback handled by normalizers.
-      return {} as T;
+      if (error instanceof JsonResponseParseError) {
+        console.error("[council] model returned non-JSON content", {
+          stage: context?.stage,
+          sessionId: context?.sessionId,
+          memberId: context?.memberId,
+          round: context?.round,
+          turnIndex: context?.turnIndex,
+          message: error.message,
+          rawPreview: error.rawResponse.slice(0, 1200)
+        });
+        // Deterministic fallback handled by normalizers.
+        return {
+          __errorType: "json_parse_error",
+          message: error.message,
+          raw: error.rawResponse.slice(0, 800)
+        } as T;
+      }
+
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("[council] model completion failed", {
+        stage: context?.stage,
+        sessionId: context?.sessionId,
+        memberId: context?.memberId,
+        round: context?.round,
+        turnIndex: context?.turnIndex,
+        message
+      });
+      throw new Error(`Model completion failed: ${message}`);
     }
   }
 

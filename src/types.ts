@@ -16,6 +16,7 @@ export type EventType =
   | "VOTE_RESULT"
   | "ROUND_LIMIT_REACHED"
   | "LEADER_SUMMARY"
+  | "OUTPUT_ARTIFACT_WRITTEN"
   | "SESSION_CLOSED";
 
 export type TurnActionType = "CONTRIBUTE" | "PASS" | "CALL_VOTE";
@@ -173,7 +174,10 @@ export interface CouncilConfig {
 export interface SessionRunOptions {
   humanPrompt: string;
   approveExecution: boolean;
+  outputType?: CouncilOutputType;
 }
+
+export type CouncilOutputType = "none" | "documentation";
 
 export interface SessionResult {
   sessionId: string;
@@ -182,6 +186,7 @@ export interface SessionResult {
   finalResolution: string;
   requiresExecution: boolean;
   executionApproved: boolean;
+  outputType: CouncilOutputType;
   artifacts: {
     sessionDir: string;
     transcriptFile: string;
@@ -189,5 +194,6 @@ export interface SessionResult {
     sessionStateFile: string;
     leaderSummaryFile: string;
     executionHandoffFile?: string;
+    outputDocumentFile?: string;
   };
 }
