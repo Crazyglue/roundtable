@@ -29,6 +29,7 @@ Provide a stable entrypoint for users and contributors:
 
 - `members[]` must be odd count and >= 3.
 - `deliberation.highLevelRounds` and `deliberation.implementationRounds` control the two-pass protocol.
+- `turnOrder` sets deterministic round-robin order; when omitted, member declaration order is used.
 - Each member has `model` config with provider/model/base URL.
 - Auth is typically `credential-ref` after onboarding.
 - Legacy `maxRounds` is still accepted as a fallback/default for both passes when `deliberation` is omitted.

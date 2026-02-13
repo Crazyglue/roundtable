@@ -11,6 +11,10 @@ This folder contains high-level architecture and component docs for contributors
 - [Auth and Onboarding](./components/auth-and-onboarding.md)
 - [Storage and Artifacts](./components/storage-and-artifacts.md)
 
+## Examples
+
+- `docs/examples/` contains captured session artifacts (transcript/events/session state/output docs) that illustrate the current two-pass deliberation protocol.
+
 ## Suggested Reading Order
 
 1. System overview

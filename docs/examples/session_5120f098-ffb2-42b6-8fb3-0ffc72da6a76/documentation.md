@@ -57,6 +57,28 @@ Verification suites simulate quota breaches, heartbeat failures, node churn, and
   - Etcd-backed 30s leases record nodePoolId, resource vector, expected runtime, priority.
   - Controller must renew leases within 25s; missed renewals cause scheduler to requeue (exp backoff up to 3 attempts) and report ETA to tenants.
 
+## Known Risks and Mitigations
+- **Risk:** Quota cache drift causes incorrect admission decisions.
+  - **Trigger:** Cache lag or reconciliation delay pushes drift above 10%.
+  - **Impact:** Jobs may be over-admitted or incorrectly rejected.
+  - **Mitigation:** Reconciliation alerts, forced cache refresh, and conservative admission fallback.
+- **Risk:** Lease churn or lease-store instability creates placement flapping.
+  - **Trigger:** Missed 25s renewal threshold or lease backend instability.
+  - **Impact:** Jobs bounce between queues, increasing latency and cost.
+  - **Mitigation:** Exponential backoff requeue, bounded retries, ETA surfacing, and control-plane SLO alerts.
+- **Risk:** Retry storms under partial infra failure.
+  - **Trigger:** Correlated node failures or transient staging outage.
+  - **Impact:** Cluster saturation, delayed recovery, and budget burn.
+  - **Mitigation:** Retry budgets (max 3), controller mutex, circuit breakers, and staged autoscale with backpressure.
+- **Risk:** Duplicate artifact emission during recovery paths.
+  - **Trigger:** Replayed retries after uncertain completion.
+  - **Impact:** Data integrity issues and downstream confusion.
+  - **Mitigation:** Checkpoint digest verification and atomic completion-state writes before success publication.
+- **Risk:** Telemetry relay degradation breaks progress/log SLOs.
+  - **Trigger:** Relay backlog under high fan-out or regional impairment.
+  - **Impact:** Tenant visibility delays and weaker incident response.
+  - **Mitigation:** Durable buffering, replay paths, saturation alerts, and load-shedding policies.
+
 ## Failure Handling and Operations
 - **Heartbeat Monitoring:** Agents send heartbeats every 5s; two consecutive misses (<10s) trigger controller retries or failures within the expected job duration window while updating alerts.
 - **Retry Control:** Execution controller enforces 3 attempts per job with exponential backoff; checkpoints verified (digest vs stored) before completion to prevent duplicate outputs. Manual retries increment retry budget via API.

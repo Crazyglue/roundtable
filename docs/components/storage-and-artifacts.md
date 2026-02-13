@@ -33,6 +33,15 @@ Persist all deliberation state so sessions are auditable and memory remains usef
 - Member prompt context is computed from active records scoped to the most recent 25 session IDs (older records remain stored but fade from prompt influence).
 - Session finalization writes resolved state and artifact pointers.
 
+## Memory Behavior
+
+- Member memory keeps a bounded active record set (`MEMORY.json`) and a bounded recent-session digest list.
+- Prompt context is rebuilt from active records after each session close and is what gets injected into turn prompts.
+- "Fade" behavior means:
+  - Records tied only to older sessions fall out of prompt context after the most recent 25 sessions.
+  - Those records remain on disk in memory JSON/markdown and are not deleted.
+- This preserves long-term auditability while biasing model context toward recent, relevant lessons.
+
 ## Contributor Touchpoints
 
 - When adding new artifact types:

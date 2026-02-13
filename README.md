@@ -20,11 +20,23 @@ Contributor docs: see [`docs/README.md`](docs/README.md).
 2. Sessions run in two passes: `HIGH_LEVEL` then `IMPLEMENTATION`.
 3. Rounds are configurable per pass (`deliberation.highLevelRounds` and `deliberation.implementationRounds`, defaults 5/5).
 4. Members are aware of pass objective and remaining rounds/turns in prompts.
-5. `CALL_VOTE` pauses discussion for seconding.
-6. If no second, discussion resumes.
-7. If seconded, blind ballots are collected in parallel.
-8. Motion passes only with strict majority of full council.
-9. If no passing motion by round limit, that pass closes by limit and the session continues to the next pass.
+5. Turn order is deterministic (`turnOrder` when set, else member declaration order).
+6. `CALL_VOTE` pauses discussion for seconding.
+7. If no second, discussion resumes.
+8. If seconded, blind ballots are collected in parallel.
+9. Motion passes only with strict majority of full council.
+10. If no passing motion by round limit, that pass closes by limit and the session continues to the next pass.
+
+Deliberation config example:
+
+```json
+{
+  "deliberation": {
+    "highLevelRounds": 5,
+    "implementationRounds": 5
+  }
+}
+```
 
 ## Layout
 

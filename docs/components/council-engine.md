@@ -31,6 +31,16 @@ Run the council protocol from start to finish, including:
    - Documentation output requires explicit known risks and mitigations.
 9. Write `SESSION_CLOSED` and refresh memory state from session outcomes.
 
+## Round-Robin Semantics
+
+- Turn order comes from `turnOrder` config (or member declaration order when omitted).
+- In each pass, each round gives exactly one turn to each member in turn-order sequence.
+- `CALL_VOTE` interrupts discussion to run seconding/voting, then returns to discussion unless the motion passes.
+- Round limits are pass-scoped:
+  - `HIGH_LEVEL` ends when a motion passes or `deliberation.highLevelRounds` is exhausted.
+  - `IMPLEMENTATION` ends when a motion passes or `deliberation.implementationRounds` is exhausted.
+- The implementation pass receives the high-level pass resolution as explicit prompt context.
+
 ## Error Handling
 
 - Non-JSON model responses:

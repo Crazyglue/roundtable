@@ -22,6 +22,11 @@ This project runs a structured multi-agent "council" over a user prompt and can 
 4. Session events are written incrementally and memory is refreshed at close from session outcomes.
 5. Session artifacts are written to `.council/sessions/<session_id>/`.
 
+Round-robin details:
+- Turn order is fixed per session (`turnOrder` or member declaration order).
+- Each pass executes full rounds where every member receives one turn.
+- A pass closes by majority vote or by hitting its configured round cap.
+
 ## High-Level Architecture
 
 ```mermaid
