@@ -25,7 +25,8 @@ Contributor docs: see [`docs/README.md`](docs/README.md).
 7. If no second, discussion resumes.
 8. If seconded, blind ballots are collected in parallel.
 9. Motion passes only with strict majority of full council.
-10. If no passing motion by round limit, that pass closes by limit and the session continues to the next pass.
+10. If the `HIGH_LEVEL` pass hits round limit without a passing motion, an automatic continuation vote is called.
+11. Implementation runs only if that continuation vote passes; otherwise the session closes.
 
 Deliberation config example:
 

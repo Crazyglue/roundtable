@@ -24,12 +24,13 @@ Run the council protocol from start to finish, including:
    - `TURN_ACTION`
    - if motion called: seconding + voting
 4. `PASS_COMPLETED` for `HIGH_LEVEL`.
-5. `PASS_STARTED` for `IMPLEMENTATION`; repeat round/member loop.
-6. `PASS_COMPLETED` for `IMPLEMENTATION`.
-7. Generate leader summary.
-8. Optionally generate output artifact (`documentation.md`).
+5. If `HIGH_LEVEL` ended by round limit: run automatic continuation vote.
+6. Start `IMPLEMENTATION` only when continuation vote passes.
+7. `PASS_COMPLETED` for `IMPLEMENTATION` (when run).
+8. Generate leader summary.
+9. Optionally generate output artifact (`documentation.md`).
    - Documentation output requires explicit known risks and mitigations.
-9. Write `SESSION_CLOSED` and refresh memory state from session outcomes.
+10. Write `SESSION_CLOSED` and refresh memory state from session outcomes.
 
 ## Round-Robin Semantics
 
@@ -38,6 +39,7 @@ Run the council protocol from start to finish, including:
 - `CALL_VOTE` interrupts discussion to run seconding/voting, then returns to discussion unless the motion passes.
 - Round limits are pass-scoped:
   - `HIGH_LEVEL` ends when a motion passes or `deliberation.highLevelRounds` is exhausted.
+  - If `HIGH_LEVEL` ends by round limit, continuation to `IMPLEMENTATION` requires a majority continuation vote.
   - `IMPLEMENTATION` ends when a motion passes or `deliberation.implementationRounds` is exhausted.
 - The implementation pass receives the high-level pass resolution as explicit prompt context.
 

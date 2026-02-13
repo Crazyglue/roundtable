@@ -26,6 +26,7 @@ import { makeId, nowIso, sortByStableOrder, toJsonString } from "../utils.js";
 import { MemoryStore } from "../storage/memoryStore.js";
 import { SessionRecorder } from "../storage/sessionRecorder.js";
 import {
+  buildContinuationVotePrompt,
   buildDocumentationOutputPrompt,
   buildLeaderElectionPrompt,
   buildLeaderSummaryPrompt,
@@ -59,6 +60,12 @@ interface DeliberationPassResult {
 interface RuntimeState {
   phase: CouncilPhase;
   turnIndex: number;
+}
+
+interface ContinuationVoteResult {
+  passed: boolean;
+  yesVotes: number;
+  noVotesEffective: number;
 }
 
 export class CouncilOrchestrator {
@@ -146,20 +153,59 @@ export class CouncilOrchestrator {
       priorPassResolution: highLevelResult.finalResolution
     };
 
-    const implementationResult = await this.runDeliberationPass({
-      plan: implementationPlan,
-      sessionId,
-      humanPrompt: options.humanPrompt,
-      turnOrder,
-      recorder,
-      memoryStore,
-      appendEvent,
-      state
-    });
+    let implementationResult: DeliberationPassResult | undefined;
+    let implementationSkippedReason: string | undefined;
 
-    const finalPass = implementationResult;
+    if (highLevelResult.endedBy === "ROUND_LIMIT") {
+      const continuationVote = await this.runContinuationVote({
+        sessionId,
+        turnOrder,
+        recorder,
+        appendEvent,
+        state,
+        highLevelResolution: highLevelResult.finalResolution,
+        highLevelRoundLimit: deliberation.highLevelRounds
+      });
+      if (continuationVote.passed) {
+        implementationResult = await this.runDeliberationPass({
+          plan: implementationPlan,
+          sessionId,
+          humanPrompt: options.humanPrompt,
+          turnOrder,
+          recorder,
+          memoryStore,
+          appendEvent,
+          state
+        });
+      } else {
+        implementationSkippedReason =
+          "Session closed after high-level round limit; continuation vote to implementation did not pass.";
+      }
+    } else {
+      implementationResult = await this.runDeliberationPass({
+        plan: implementationPlan,
+        sessionId,
+        humanPrompt: options.humanPrompt,
+        turnOrder,
+        recorder,
+        memoryStore,
+        appendEvent,
+        state
+      });
+    }
+
+    const finalPass: DeliberationPassResult = implementationResult ?? {
+      passId: "HIGH_LEVEL",
+      endedBy: "ROUND_LIMIT",
+      finalResolution:
+        implementationSkippedReason ??
+        "Session closed: continuation to implementation did not pass.",
+      winningMotion: highLevelResult.winningMotion
+    };
     state.phase = "CLOSED";
-    const totalConfiguredRounds = deliberation.highLevelRounds + deliberation.implementationRounds;
+    const totalConfiguredRounds =
+      deliberation.highLevelRounds +
+      (implementationResult ? deliberation.implementationRounds : 0);
 
     const leaderSummaryPrompt = buildLeaderSummaryPrompt(
       this.config,
@@ -198,7 +244,9 @@ export class CouncilOrchestrator {
           options.humanPrompt,
           recorder.getTranscript(),
           highLevelResult.finalResolution,
-          leaderSummary.finalResolution
+          implementationResult
+            ? leaderSummary.finalResolution
+            : `Implementation pass skipped. ${implementationSkippedReason ?? "Continuation vote failed."}`
         );
         const documentation = await this.requireClient(leaderId).completeText(
           [
@@ -225,7 +273,9 @@ export class CouncilOrchestrator {
           highLevelResult.finalResolution,
           "",
           "## Implementation Plan Resolution",
-          leaderSummary.finalResolution,
+          implementationResult
+            ? leaderSummary.finalResolution
+            : `Implementation pass skipped. ${implementationSkippedReason ?? "Continuation vote failed."}`,
           "",
           "## Notes",
           "Generated fallback document due to documentation generation error.",
@@ -293,7 +343,15 @@ export class CouncilOrchestrator {
       deliberation,
       passResolutions: {
         highLevel: highLevelResult,
-        implementation: implementationResult
+        implementation:
+          implementationResult ??
+          ({
+            passId: "IMPLEMENTATION",
+            skipped: true,
+            reason:
+              implementationSkippedReason ??
+              "High-level pass reached round limit and continuation vote did not pass."
+          } as const)
       },
       endedBy: finalPass.endedBy,
       finalResolution: leaderSummary.finalResolution,
@@ -568,6 +626,79 @@ export class CouncilOrchestrator {
       finalResolution,
       winningMotion
     };
+  }
+
+  private async runContinuationVote(input: {
+    sessionId: string;
+    turnOrder: string[];
+    recorder: SessionRecorder;
+    appendEvent: (
+      type: CouncilEvent["type"],
+      round: number,
+      payload: unknown,
+      actorId?: string
+    ) => Promise<void>;
+    state: RuntimeState;
+    highLevelResolution: string;
+    highLevelRoundLimit: number;
+  }): Promise<ContinuationVoteResult> {
+    const { sessionId, turnOrder, recorder, appendEvent, state, highLevelResolution, highLevelRoundLimit } =
+      input;
+
+    state.phase = "VOTING";
+    await appendEvent("CONTINUATION_VOTE_CALLED", highLevelRoundLimit, {
+      fromPass: "HIGH_LEVEL",
+      toPass: "IMPLEMENTATION",
+      reason: "High-level pass reached configured round limit.",
+      highLevelResolution
+    });
+
+    const votePairs = await Promise.all(
+      turnOrder.map(async (memberId) => {
+        const member = this.requireMember(memberId);
+        const votePrompt = buildContinuationVotePrompt(
+          this.config,
+          member,
+          highLevelResolution,
+          recorder.getTranscript()
+        );
+        const voteRaw = await this.completeJsonSafe<VoteResponse>(
+          this.requireClient(memberId),
+          member.systemPrompt,
+          votePrompt,
+          { temperature: member.model.temperature, maxTokens: member.model.maxTokens },
+          {
+            stage: "continuation_vote",
+            sessionId,
+            memberId,
+            round: highLevelRoundLimit,
+            turnIndex: state.turnIndex
+          }
+        );
+        return { memberId, vote: normalizeVoteResponse(voteRaw) };
+      })
+    );
+
+    for (const pair of votePairs) {
+      await appendEvent(
+        "VOTE_CAST",
+        highLevelRoundLimit,
+        { voteType: "CONTINUATION_TO_IMPLEMENTATION", ...pair.vote, passId: "HIGH_LEVEL" },
+        pair.memberId
+      );
+    }
+
+    const passResult = this.computeVotePass(votePairs.map((v) => v.vote.ballot));
+    await appendEvent("CONTINUATION_VOTE_RESULT", highLevelRoundLimit, {
+      voteType: "CONTINUATION_TO_IMPLEMENTATION",
+      passed: passResult.passed,
+      yesVotes: passResult.yesVotes,
+      noVotesEffective: passResult.noVotesEffective,
+      totalCouncilSize: turnOrder.length
+    });
+    state.phase = "DISCUSSION";
+
+    return passResult;
   }
 
   private async electLeader(

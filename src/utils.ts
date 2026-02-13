@@ -25,11 +25,20 @@ export function extractJsonObject(text: string): string {
     if (fromFence) {
       return fromFence;
     }
+    const repairedFence = tryRepairMalformedBalancedJson(inner);
+    if (repairedFence) {
+      return repairedFence;
+    }
   }
 
   const fromText = tryExtractBalancedJson(trimmed);
   if (fromText) {
     return fromText;
+  }
+
+  const repairedBalanced = tryRepairMalformedBalancedJson(trimmed);
+  if (repairedBalanced) {
+    return repairedBalanced;
   }
 
   const repaired = tryRepairTruncatedJson(trimmed);
@@ -99,6 +108,127 @@ function tryExtractBalancedJson(input: string): string | null {
   return null;
 }
 
+function tryRepairMalformedBalancedJson(input: string): string | null {
+  const candidate = findFirstBalancedObject(input);
+  if (!candidate) {
+    return null;
+  }
+
+  const sanitized = sanitizeJsonStringLiterals(candidate);
+  try {
+    JSON.parse(sanitized);
+    return sanitized;
+  } catch {
+    return null;
+  }
+}
+
+function findFirstBalancedObject(input: string): string | null {
+  const starts: number[] = [];
+  for (let i = 0; i < input.length; i += 1) {
+    if (input[i] === "{") {
+      starts.push(i);
+    }
+  }
+
+  for (const start of starts) {
+    let depth = 0;
+    let inString = false;
+    let escaping = false;
+
+    for (let i = start; i < input.length; i += 1) {
+      const ch = input[i];
+
+      if (inString) {
+        if (escaping) {
+          escaping = false;
+          continue;
+        }
+        if (ch === "\\") {
+          escaping = true;
+          continue;
+        }
+        if (ch === "\"") {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (ch === "\"") {
+        inString = true;
+        continue;
+      }
+
+      if (ch === "{") {
+        depth += 1;
+        continue;
+      }
+
+      if (ch === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          return input.slice(start, i + 1);
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+function sanitizeJsonStringLiterals(input: string): string {
+  let out = "";
+  let inString = false;
+  let escaping = false;
+
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
+
+    if (inString) {
+      if (escaping) {
+        out += ch;
+        escaping = false;
+        continue;
+      }
+
+      if (ch === "\\") {
+        out += ch;
+        escaping = true;
+        continue;
+      }
+
+      if (ch === "\"") {
+        out += ch;
+        inString = false;
+        continue;
+      }
+
+      if (ch === "\n") {
+        out += "\\n";
+        continue;
+      }
+      if (ch === "\r") {
+        out += "\\r";
+        continue;
+      }
+      if (ch === "\t") {
+        out += "\\t";
+        continue;
+      }
+
+      out += ch;
+      continue;
+    }
+
+    out += ch;
+    if (ch === "\"") {
+      inString = true;
+    }
+  }
+
+  return out;
+}
+
 function tryRepairTruncatedJson(input: string): string | null {
   const start = input.indexOf("{");
   if (start === -1) {
@@ -151,9 +281,10 @@ function tryRepairTruncatedJson(input: string): string | null {
     candidate += "}".repeat(depth);
   }
 
+  const sanitized = sanitizeJsonStringLiterals(candidate);
   try {
-    JSON.parse(candidate);
-    return candidate;
+    JSON.parse(sanitized);
+    return sanitized;
   } catch {
     return null;
   }

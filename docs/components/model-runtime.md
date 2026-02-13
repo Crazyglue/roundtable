@@ -22,6 +22,7 @@ Abstract LLM calls behind a single interface used by the orchestrator.
 
 - `completeText()` returns text for orchestrator prompts.
 - `completeJson()` extracts/repairs JSON text and parses it.
+- JSON extraction includes best-effort repair for common malformed outputs (for example, literal control characters/newlines inside string values and truncated closing braces).
 - Parse errors are wrapped as `JsonResponseParseError`.
 
 ## Important Runtime Behavior

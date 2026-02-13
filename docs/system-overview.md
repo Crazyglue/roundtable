@@ -14,7 +14,8 @@ This project runs a structured multi-agent "council" over a user prompt and can 
 3. On `run`, orchestrator starts a new session:
    - leader election
    - high-level pass (`HIGH_LEVEL`)
-   - implementation pass (`IMPLEMENTATION`)
+   - automatic continuation vote if high-level hits round limit
+   - implementation pass (`IMPLEMENTATION`) only when continuation vote passes
    - round-robin discussion within each pass
    - motion seconding
    - blind voting
@@ -26,6 +27,7 @@ Round-robin details:
 - Turn order is fixed per session (`turnOrder` or member declaration order).
 - Each pass executes full rounds where every member receives one turn.
 - A pass closes by majority vote or by hitting its configured round cap.
+- If high-level closes by round cap, a majority continuation vote determines whether implementation runs.
 
 ## High-Level Architecture
 
