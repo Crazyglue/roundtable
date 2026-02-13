@@ -84,6 +84,82 @@ Under `storage.memoryDir/`:
 
 ## Notes
 
-- `openai-compatible` and `openai` providers share one adapter so you can use OpenAI-compatible gateways.
-- `anthropic` provider is included for Claude-compatible direct API usage.
+- All LLM interactions now go through `@mariozechner/pi-ai` via a unified adapter.
+- Default API mapping by `model.provider`:
+  - `openai` / `openai-compatible` -> `openai-completions`
+  - `anthropic` -> `anthropic-messages`
+  - `openai-codex` -> `openai-codex-responses`
+- You can override API selection with `model.api` when needed.
+- Authentication now supports:
+  - `model.apiKeyEnv` (legacy shortcut)
+  - `model.auth.method = "api-key-env"`
+  - `model.auth.method = "oauth-device-code"` (interactive OAuth device flow + token cache)
+  - `model.auth.method = "command"` (run a helper command that returns a token on stdout)
+- OAuth tokens are cached by default at `~/.llm-council/tokens.json` (override with `tokenStorePath`).
+- Direct OpenAI/Anthropic API usage remains key-oriented; OAuth is mainly useful for compatible gateways or broker/helper flows.
 - This scaffold does not execute code changes yet. It emits execution handoff data and enforces approval gating.
+
+## Auth Config Examples
+
+API key env:
+
+```json
+{
+  "provider": "openai-compatible",
+  "model": "gpt-4.1",
+  "auth": {
+    "method": "api-key-env",
+    "apiKeyEnv": "OPENAI_API_KEY"
+  }
+}
+```
+
+OAuth device flow:
+
+```json
+{
+  "provider": "openai-compatible",
+  "model": "my-gateway-model",
+  "baseUrl": "https://gateway.example.com/v1",
+  "auth": {
+    "method": "oauth-device-code",
+    "clientId": "my-client-id",
+    "deviceAuthorizationEndpoint": "https://auth.example.com/oauth/device/code",
+    "tokenEndpoint": "https://auth.example.com/oauth/token",
+    "scopes": ["models:inference"],
+    "cacheKey": "gateway-prod"
+  }
+}
+```
+
+Codex-style provider (via `openai-codex-responses` mapping):
+
+```json
+{
+  "provider": "openai-codex",
+  "model": "gpt-5.1-codex-mini",
+  "baseUrl": "https://chatgpt.com/backend-api",
+  "auth": {
+    "method": "oauth-device-code",
+    "clientId": "app_EMoamEEZ73f0CkXaXp7hrann",
+    "deviceAuthorizationEndpoint": "https://auth.openai.com/oauth/device/code",
+    "tokenEndpoint": "https://auth.openai.com/oauth/token",
+    "scopes": ["openid", "profile", "email", "offline_access"],
+    "cacheKey": "openai-codex-oauth"
+  }
+}
+```
+
+Command-based auth helper:
+
+```json
+{
+  "provider": "openai-compatible",
+  "model": "gpt-4.1",
+  "auth": {
+    "method": "command",
+    "command": "/usr/local/bin/my-token-helper --provider openai",
+    "cacheTtlSeconds": 1800
+  }
+}
+```

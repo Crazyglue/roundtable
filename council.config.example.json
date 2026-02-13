@@ -16,10 +16,17 @@
         "cost": 0.1
       },
       "model": {
-        "provider": "openai-compatible",
-        "baseUrl": "https://api.openai.com/v1",
-        "model": "gpt-4.1",
-        "apiKeyEnv": "OPENAI_API_KEY",
+        "provider": "openai-codex",
+        "baseUrl": "https://chatgpt.com/backend-api",
+        "model": "gpt-5.3-codex",
+        "auth": {
+          "method": "oauth-device-code",
+          "clientId": "app_EMoamEEZ73f0CkXaXp7hrann",
+          "deviceAuthorizationEndpoint": "https://auth.openai.com/oauth/device/code",
+          "tokenEndpoint": "https://auth.openai.com/oauth/token",
+          "scopes": ["openid", "profile", "email", "offline_access"],
+          "cacheKey": "openai-codex-oauth"
+        },
         "temperature": 0.2,
         "maxTokens": 1200
       }
@@ -38,9 +45,16 @@
       },
       "model": {
         "provider": "openai-compatible",
-        "baseUrl": "https://api.openai.com/v1",
-        "model": "gpt-4.1-mini",
-        "apiKeyEnv": "OPENAI_API_KEY",
+        "baseUrl": "https://gateway.example.com/openai/v1",
+        "model": "gpt-5.3-codex",
+        "auth": {
+          "method": "oauth-device-code",
+          "clientId": "llm-council-openai-client",
+          "deviceAuthorizationEndpoint": "https://auth.example.com/oauth/device/code",
+          "tokenEndpoint": "https://auth.example.com/oauth/token",
+          "scopes": ["models:inference", "models:read"],
+          "cacheKey": "gateway-openai-prod"
+        },
         "temperature": 0.2,
         "maxTokens": 1200
       }
@@ -59,8 +73,16 @@
       },
       "model": {
         "provider": "anthropic",
+        "baseUrl": "https://gateway.example.com/anthropic",
         "model": "claude-3-7-sonnet-latest",
-        "apiKeyEnv": "ANTHROPIC_API_KEY",
+        "auth": {
+          "method": "oauth-device-code",
+          "clientId": "llm-council-anthropic-client",
+          "deviceAuthorizationEndpoint": "https://auth.example.com/oauth/device/code",
+          "tokenEndpoint": "https://auth.example.com/oauth/token",
+          "scopes": ["models:inference", "models:read"],
+          "cacheKey": "gateway-anthropic-prod"
+        },
         "temperature": 0.2,
         "maxTokens": 1200
       }

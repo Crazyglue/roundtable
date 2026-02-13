@@ -1,11 +1,39 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { CouncilConfig } from "./types.js";
+import { CouncilConfig, ModelAuthConfig } from "./types.js";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(`Config validation error: ${message}`);
   }
+}
+
+function validateAuthConfig(auth: ModelAuthConfig, memberId: string): void {
+  if (auth.method === "api-key-env") {
+    assert(Boolean(auth.apiKeyEnv), `member ${memberId} auth.apiKeyEnv is required`);
+    return;
+  }
+
+  if (auth.method === "oauth-device-code") {
+    assert(Boolean(auth.clientId), `member ${memberId} auth.clientId is required`);
+    assert(
+      Boolean(auth.deviceAuthorizationEndpoint),
+      `member ${memberId} auth.deviceAuthorizationEndpoint is required`
+    );
+    assert(Boolean(auth.tokenEndpoint), `member ${memberId} auth.tokenEndpoint is required`);
+    return;
+  }
+
+  if (auth.method === "command") {
+    assert(Boolean(auth.command), `member ${memberId} auth.command is required`);
+    if (auth.cacheTtlSeconds !== undefined) {
+      assert(auth.cacheTtlSeconds > 0, `member ${memberId} auth.cacheTtlSeconds must be > 0`);
+    }
+    return;
+  }
+
+  const exhaustive: never = auth;
+  throw new Error(`Unhandled auth method for member ${memberId}: ${JSON.stringify(exhaustive)}`);
 }
 
 export async function loadConfig(configPath: string): Promise<CouncilConfig> {
@@ -36,7 +64,11 @@ export async function loadConfig(configPath: string): Promise<CouncilConfig> {
     assert(typeof member.focusWeights === "object" && member.focusWeights !== null, `member ${member.id} requires focusWeights`);
     assert(member.model?.provider, `member ${member.id} requires model.provider`);
     assert(member.model?.model, `member ${member.id} requires model.model`);
-    assert(member.model?.apiKeyEnv, `member ${member.id} requires model.apiKeyEnv`);
+    if (member.model?.auth) {
+      validateAuthConfig(member.model.auth, member.id);
+    } else {
+      assert(member.model?.apiKeyEnv, `member ${member.id} requires model.apiKeyEnv or model.auth`);
+    }
   }
 
   if (parsed.turnOrder) {

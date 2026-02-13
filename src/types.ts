@@ -93,14 +93,50 @@ export interface CouncilEvent {
 }
 
 export interface ModelConfig {
-  provider: "openai-compatible" | "openai" | "anthropic";
+  provider:
+    | "openai-compatible"
+    | "openai"
+    | "anthropic"
+    | "openai-codex"
+    | (string & {});
   model: string;
-  apiKeyEnv: string;
+  apiKeyEnv?: string;
+  auth?: ModelAuthConfig;
+  api?: string;
   baseUrl?: string;
   temperature?: number;
   maxTokens?: number;
   headers?: Record<string, string>;
 }
+
+export interface ApiKeyEnvAuthConfig {
+  method: "api-key-env";
+  apiKeyEnv: string;
+}
+
+export interface OauthDeviceCodeAuthConfig {
+  method: "oauth-device-code";
+  clientId: string;
+  deviceAuthorizationEndpoint: string;
+  tokenEndpoint: string;
+  scopes?: string[];
+  audience?: string;
+  cacheKey?: string;
+  tokenStorePath?: string;
+}
+
+export interface CommandAuthConfig {
+  method: "command";
+  command: string;
+  cacheKey?: string;
+  cacheTtlSeconds?: number;
+  tokenStorePath?: string;
+}
+
+export type ModelAuthConfig =
+  | ApiKeyEnvAuthConfig
+  | OauthDeviceCodeAuthConfig
+  | CommandAuthConfig;
 
 export interface CouncilMemberConfig {
   id: string;
