@@ -1,60 +1,48 @@
 import { ChatMessage, CompletionOptions, ModelClient } from "./modelClient.js";
 import { ModelConfig } from "../types.js";
-
-interface AnthropicResponse {
-  content?: Array<{ type: string; text?: string }>;
-}
+import Anthropic from "@anthropic-ai/sdk";
 
 export class AnthropicClient implements ModelClient {
-  private readonly endpoint: string;
-  private readonly apiKey: string;
+  private readonly client: Anthropic;
   private readonly model: string;
   private readonly defaultTemperature?: number;
   private readonly defaultMaxTokens?: number;
-  private readonly headers: Record<string, string>;
 
   constructor(config: ModelConfig) {
-    this.endpoint = `${(config.baseUrl ?? "https://api.anthropic.com").replace(/\/$/, "")}/v1/messages`;
-    this.apiKey = process.env[config.apiKeyEnv] ?? "";
+    const apiKey = process.env[config.apiKeyEnv] ?? "";
+    if (!apiKey) {
+      throw new Error(`Missing API key env var: ${config.apiKeyEnv}`);
+    }
+
+    this.client = new Anthropic({
+      apiKey,
+      baseURL: config.baseUrl,
+      defaultHeaders: config.headers
+    });
     this.model = config.model;
     this.defaultTemperature = config.temperature;
     this.defaultMaxTokens = config.maxTokens ?? 1200;
-    this.headers = config.headers ?? {};
-    if (!this.apiKey) {
-      throw new Error(`Missing API key env var: ${config.apiKeyEnv}`);
-    }
   }
 
   async completeText(messages: ChatMessage[], options?: CompletionOptions): Promise<string> {
     const systemParts = messages.filter((m) => m.role === "system").map((m) => m.content.trim());
-    const userAssistantMessages = messages
-      .filter((m) => m.role !== "system")
-      .map((m) => ({ role: m.role, content: m.content }));
+    const userAssistantMessages = messages.filter(
+      (m): m is ChatMessage & { role: "user" | "assistant" } =>
+        m.role === "user" || m.role === "assistant"
+    );
 
-    const res = await fetch(this.endpoint, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": this.apiKey,
-        "anthropic-version": "2023-06-01",
-        ...this.headers
-      },
-      body: JSON.stringify({
-        model: this.model,
-        max_tokens: options?.maxTokens ?? this.defaultMaxTokens,
-        temperature: options?.temperature ?? this.defaultTemperature,
-        system: systemParts.join("\n\n"),
-        messages: userAssistantMessages
-      })
+    const response = await this.client.messages.create({
+      model: this.model,
+      max_tokens: options?.maxTokens ?? this.defaultMaxTokens ?? 1200,
+      temperature: options?.temperature ?? this.defaultTemperature,
+      system: systemParts.length > 0 ? systemParts.join("\n\n") : undefined,
+      messages: userAssistantMessages.map((message) => ({
+        role: message.role,
+        content: message.content
+      }))
     });
 
-    if (!res.ok) {
-      const body = await res.text();
-      throw new Error(`Anthropic request failed (${res.status}): ${body}`);
-    }
-
-    const payload = (await res.json()) as AnthropicResponse;
-    const content = (payload.content ?? [])
+    const content = (response.content ?? [])
       .filter((part) => part.type === "text" && part.text)
       .map((part) => part.text ?? "")
       .join("")

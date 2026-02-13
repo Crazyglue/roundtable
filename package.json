@@ -8,6 +8,10 @@
     "check": "tsc --noEmit -p tsconfig.json",
     "start": "node dist/index.js"
   },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "openai": "^4.86.2"
+  },
   "devDependencies": {
     "@types/node": "^22.13.4",
     "typescript": "^5.7.3"
