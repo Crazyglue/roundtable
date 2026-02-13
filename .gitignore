@@ -1,3 +1,6 @@
 node_modules/
 council.config.json
 dist/
+.council/credentials.json
+.council/memory
+.council/sessions

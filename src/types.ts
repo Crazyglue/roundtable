@@ -133,10 +133,16 @@ export interface CommandAuthConfig {
   tokenStorePath?: string;
 }
 
+export interface CredentialRefAuthConfig {
+  method: "credential-ref";
+  credentialId: string;
+}
+
 export type ModelAuthConfig =
   | ApiKeyEnvAuthConfig
   | OauthDeviceCodeAuthConfig
-  | CommandAuthConfig;
+  | CommandAuthConfig
+  | CredentialRefAuthConfig;
 
 export interface CouncilMemberConfig {
   id: string;

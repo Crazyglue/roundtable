@@ -32,6 +32,11 @@ function validateAuthConfig(auth: ModelAuthConfig, memberId: string): void {
     return;
   }
 
+  if (auth.method === "credential-ref") {
+    assert(Boolean(auth.credentialId), `member ${memberId} auth.credentialId is required`);
+    return;
+  }
+
   const exhaustive: never = auth;
   throw new Error(`Unhandled auth method for member ${memberId}: ${JSON.stringify(exhaustive)}`);
 }
@@ -66,8 +71,6 @@ export async function loadConfig(configPath: string): Promise<CouncilConfig> {
     assert(member.model?.model, `member ${member.id} requires model.model`);
     if (member.model?.auth) {
       validateAuthConfig(member.model.auth, member.id);
-    } else {
-      assert(member.model?.apiKeyEnv, `member ${member.id} requires model.apiKeyEnv or model.auth`);
     }
   }
 

@@ -46,11 +46,11 @@ npm install
 cp council.config.example.json council.config.json
 ```
 
-3. Set provider keys (examples):
+3. Run onboarding (recommended):
 
 ```bash
-export OPENAI_API_KEY=...
-export ANTHROPIC_API_KEY=...
+npm run start -- onboard --config council.config.json
+# or: npm run onboard
 ```
 
 4. Run a session:
@@ -91,17 +91,33 @@ Under `storage.memoryDir/`:
   - `openai-codex` -> `openai-codex-responses`
 - You can override API selection with `model.api` when needed.
 - Authentication now supports:
+  - `model.auth.method = "credential-ref"` (recommended; resolved from `.council/credentials.json`)
   - `model.apiKeyEnv` (legacy shortcut)
   - `model.auth.method = "api-key-env"`
   - `model.auth.method = "oauth-device-code"` (interactive OAuth device flow + token cache)
   - `model.auth.method = "command"` (run a helper command that returns a token on stdout)
+- Onboarding writes credentials to `.council/credentials.json` (gitignored) and rewrites config auth blocks to `credential-ref`.
 - OAuth tokens are cached by default at `~/.llm-council/tokens.json` (override with `tokenStorePath`).
 - Direct OpenAI/Anthropic API usage remains key-oriented; OAuth is mainly useful for compatible gateways or broker/helper flows.
 - This scaffold does not execute code changes yet. It emits execution handoff data and enforces approval gating.
 
 ## Auth Config Examples
 
-API key env:
+Credential reference (recommended):
+
+```json
+{
+  "provider": "openai-codex",
+  "model": "gpt-5.1-codex-mini",
+  "baseUrl": "https://chatgpt.com/backend-api",
+  "auth": {
+    "method": "credential-ref",
+    "credentialId": "openai-codex"
+  }
+}
+```
+
+API key env (legacy):
 
 ```json
 {

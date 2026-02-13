@@ -18,14 +18,10 @@
       "model": {
         "provider": "openai-codex",
         "baseUrl": "https://chatgpt.com/backend-api",
-        "model": "gpt-5.3-codex",
+        "model": "gpt-5.1-codex-mini",
         "auth": {
-          "method": "oauth-device-code",
-          "clientId": "app_EMoamEEZ73f0CkXaXp7hrann",
-          "deviceAuthorizationEndpoint": "https://auth.openai.com/oauth/device/code",
-          "tokenEndpoint": "https://auth.openai.com/oauth/token",
-          "scopes": ["openid", "profile", "email", "offline_access"],
-          "cacheKey": "openai-codex-oauth"
+          "method": "credential-ref",
+          "credentialId": "openai-codex"
         },
         "temperature": 0.2,
         "maxTokens": 1200
@@ -46,14 +42,10 @@
       "model": {
         "provider": "openai-compatible",
         "baseUrl": "https://gateway.example.com/openai/v1",
-        "model": "gpt-5.3-codex",
+        "model": "gpt-4.1-mini",
         "auth": {
-          "method": "oauth-device-code",
-          "clientId": "llm-council-openai-client",
-          "deviceAuthorizationEndpoint": "https://auth.example.com/oauth/device/code",
-          "tokenEndpoint": "https://auth.example.com/oauth/token",
-          "scopes": ["models:inference", "models:read"],
-          "cacheKey": "gateway-openai-prod"
+          "method": "credential-ref",
+          "credentialId": "openai-codex"
         },
         "temperature": 0.2,
         "maxTokens": 1200
@@ -76,12 +68,8 @@
         "baseUrl": "https://gateway.example.com/anthropic",
         "model": "claude-3-7-sonnet-latest",
         "auth": {
-          "method": "oauth-device-code",
-          "clientId": "llm-council-anthropic-client",
-          "deviceAuthorizationEndpoint": "https://auth.example.com/oauth/device/code",
-          "tokenEndpoint": "https://auth.example.com/oauth/token",
-          "scopes": ["models:inference", "models:read"],
-          "cacheKey": "gateway-anthropic-prod"
+          "method": "credential-ref",
+          "credentialId": "openai-codex"
         },
         "temperature": 0.2,
         "maxTokens": 1200

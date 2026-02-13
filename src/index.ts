@@ -1,10 +1,12 @@
 import path from "node:path";
 import { loadConfig } from "./config.js";
 import { CouncilOrchestrator } from "./council/orchestrator.js";
+import { runOnboarding } from "./onboarding/onboard.js";
 
 interface CliArgs {
   command: string;
   configPath: string;
+  credentialStorePath?: string;
   prompt: string;
   approveExecution: boolean;
 }
@@ -30,6 +32,7 @@ function parseArgs(argv: string[]): CliArgs {
   return {
     command: command ?? "run",
     configPath: map.get("--config") ?? "council.config.json",
+    credentialStorePath: map.get("--credentials"),
     prompt: map.get("--prompt") ?? "",
     approveExecution: flags.has("--approve-execution")
   };
@@ -39,9 +42,11 @@ function usage(): string {
   return [
     "Usage:",
     '  npm run start -- run --config council.config.json --prompt "Your task prompt"',
+    "  npm run start -- onboard --config council.config.json",
     "",
     "Options:",
     "  --config <path>            Path to council config JSON",
+    "  --credentials <path>       Path to credential store JSON",
     "  --prompt <text>            Human task prompt",
     "  --approve-execution        Mark execution handoff as approved"
   ].join("\n");
@@ -49,6 +54,14 @@ function usage(): string {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  if (args.command === "onboard") {
+    await runOnboarding({
+      configPath: args.configPath,
+      credentialStorePath: args.credentialStorePath
+    });
+    return;
+  }
+
   if (args.command !== "run") {
     throw new Error(`Unsupported command: ${args.command}\n\n${usage()}`);
   }

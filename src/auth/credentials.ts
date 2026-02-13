@@ -4,8 +4,14 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import {
+  getOAuthApiKey,
+  type OAuthCredentials,
+  type OAuthProviderId
+} from "@mariozechner/pi-ai";
+import {
   ApiKeyEnvAuthConfig,
   CommandAuthConfig,
+  CredentialRefAuthConfig,
   ModelAuthConfig,
   ModelConfig,
   OauthDeviceCodeAuthConfig
@@ -13,13 +19,35 @@ import {
 
 const exec = promisify(execCb);
 
-interface StoredToken {
+interface LegacyTokenEntry {
   accessToken: string;
   refreshToken?: string;
   expiresAt?: string;
 }
 
-type TokenStoreShape = Record<string, StoredToken>;
+type LegacyTokenStore = Record<string, LegacyTokenEntry>;
+
+export interface OAuthCredentialStoreEntry {
+  kind: "oauth";
+  oauthProviderId: OAuthProviderId;
+  credentials: OAuthCredentials;
+  updatedAt: string;
+}
+
+export interface ApiKeyCredentialStoreEntry {
+  kind: "api-key";
+  apiKey: string;
+  providerHint?: string;
+  updatedAt: string;
+}
+
+export type CredentialStoreEntry = OAuthCredentialStoreEntry | ApiKeyCredentialStoreEntry;
+
+export interface CredentialStoreFile {
+  version: 1;
+  updatedAt: string;
+  entries: Record<string, CredentialStoreEntry>;
+}
 
 interface DeviceCodeResponse {
   device_code: string;
@@ -39,7 +67,15 @@ interface TokenResponse {
   error_description?: string;
 }
 
-function defaultTokenStorePath(): string {
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+export function defaultCredentialStorePath(): string {
+  return process.env.LLM_COUNCIL_CREDENTIAL_STORE ?? path.join(process.cwd(), ".council", "credentials.json");
+}
+
+function defaultLegacyTokenStorePath(): string {
   return path.join(os.homedir(), ".llm-council", "tokens.json");
 }
 
@@ -53,31 +89,31 @@ function buildCacheKey(config: ModelConfig, auth: ModelAuthConfig): string {
   return `${config.provider}:${config.model}`;
 }
 
-function tokenStorePathFor(auth: ModelAuthConfig): string {
+function legacyTokenStorePathFor(auth: ModelAuthConfig): string {
   if (auth.method === "oauth-device-code" && auth.tokenStorePath) {
     return auth.tokenStorePath;
   }
   if (auth.method === "command" && auth.tokenStorePath) {
     return auth.tokenStorePath;
   }
-  return process.env.LLM_COUNCIL_TOKEN_STORE ?? defaultTokenStorePath();
+  return process.env.LLM_COUNCIL_TOKEN_STORE ?? defaultLegacyTokenStorePath();
 }
 
-async function loadStore(filePath: string): Promise<TokenStoreShape> {
+async function loadLegacyTokenStore(filePath: string): Promise<LegacyTokenStore> {
   try {
     const raw = await readFile(filePath, "utf8");
-    return JSON.parse(raw) as TokenStoreShape;
+    return JSON.parse(raw) as LegacyTokenStore;
   } catch {
     return {};
   }
 }
 
-async function saveStore(filePath: string, store: TokenStoreShape): Promise<void> {
+async function saveLegacyTokenStore(filePath: string, store: LegacyTokenStore): Promise<void> {
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, `${JSON.stringify(store, null, 2)}\n`, "utf8");
 }
 
-function isValid(entry: StoredToken | undefined): boolean {
+function isLegacyTokenValid(entry: LegacyTokenEntry | undefined): boolean {
   if (!entry || !entry.accessToken) {
     return false;
   }
@@ -120,6 +156,48 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+export async function loadCredentialStore(filePath = defaultCredentialStorePath()): Promise<CredentialStoreFile> {
+  try {
+    const raw = await readFile(filePath, "utf8");
+    const parsed = JSON.parse(raw) as Partial<CredentialStoreFile>;
+    const entries = parsed.entries ?? {};
+    return {
+      version: 1,
+      updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : nowIso(),
+      entries
+    };
+  } catch {
+    return {
+      version: 1,
+      updatedAt: nowIso(),
+      entries: {}
+    };
+  }
+}
+
+export async function saveCredentialStore(
+  store: CredentialStoreFile,
+  filePath = defaultCredentialStorePath()
+): Promise<void> {
+  const normalized: CredentialStoreFile = {
+    version: 1,
+    updatedAt: nowIso(),
+    entries: store.entries
+  };
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
+}
+
+export async function upsertCredentialStoreEntry(
+  credentialId: string,
+  entry: CredentialStoreEntry,
+  filePath = defaultCredentialStorePath()
+): Promise<void> {
+  const store = await loadCredentialStore(filePath);
+  store.entries[credentialId] = entry;
+  await saveCredentialStore(store, filePath);
+}
+
 async function resolveFromApiKeyEnv(auth: ApiKeyEnvAuthConfig): Promise<string> {
   const token = process.env[auth.apiKeyEnv] ?? "";
   if (!token) {
@@ -130,10 +208,10 @@ async function resolveFromApiKeyEnv(auth: ApiKeyEnvAuthConfig): Promise<string> 
 
 async function resolveFromCommand(auth: CommandAuthConfig, config: ModelConfig): Promise<string> {
   const cacheKey = buildCacheKey(config, auth);
-  const storePath = tokenStorePathFor(auth);
-  const store = await loadStore(storePath);
+  const storePath = legacyTokenStorePathFor(auth);
+  const store = await loadLegacyTokenStore(storePath);
   const cached = store[cacheKey];
-  if (isValid(cached)) {
+  if (isLegacyTokenValid(cached)) {
     return cached.accessToken;
   }
 
@@ -148,7 +226,7 @@ async function resolveFromCommand(auth: CommandAuthConfig, config: ModelConfig):
       accessToken: token,
       expiresAt: new Date(Date.now() + auth.cacheTtlSeconds * 1000).toISOString()
     };
-    await saveStore(storePath, store);
+    await saveLegacyTokenStore(storePath, store);
   }
 
   return token;
@@ -157,7 +235,7 @@ async function resolveFromCommand(auth: CommandAuthConfig, config: ModelConfig):
 async function refreshAccessToken(
   auth: OauthDeviceCodeAuthConfig,
   refreshToken: string
-): Promise<StoredToken | undefined> {
+): Promise<LegacyTokenEntry | undefined> {
   try {
     const token = await postForm<TokenResponse>(auth.tokenEndpoint, {
       grant_type: "refresh_token",
@@ -181,7 +259,7 @@ async function refreshAccessToken(
   }
 }
 
-async function runDeviceCodeFlow(auth: OauthDeviceCodeAuthConfig): Promise<StoredToken> {
+async function runDeviceCodeFlow(auth: OauthDeviceCodeAuthConfig): Promise<LegacyTokenEntry> {
   const device = await postForm<DeviceCodeResponse>(auth.deviceAuthorizationEndpoint, {
     client_id: auth.clientId,
     scope: auth.scopes?.join(" "),
@@ -242,30 +320,74 @@ async function runDeviceCodeFlow(auth: OauthDeviceCodeAuthConfig): Promise<Store
 
 async function resolveFromOauthDevice(auth: OauthDeviceCodeAuthConfig, config: ModelConfig): Promise<string> {
   const cacheKey = buildCacheKey(config, auth);
-  const storePath = tokenStorePathFor(auth);
-  const store = await loadStore(storePath);
+  const storePath = legacyTokenStorePathFor(auth);
+  const store = await loadLegacyTokenStore(storePath);
   const existing = store[cacheKey];
 
-  if (isValid(existing)) {
+  if (isLegacyTokenValid(existing)) {
     return existing.accessToken;
   }
 
   if (existing?.refreshToken) {
     const refreshed = await refreshAccessToken(auth, existing.refreshToken);
-    if (refreshed && isValid(refreshed)) {
+    if (refreshed && isLegacyTokenValid(refreshed)) {
       store[cacheKey] = refreshed;
-      await saveStore(storePath, store);
+      await saveLegacyTokenStore(storePath, store);
       return refreshed.accessToken;
     }
   }
 
   const issued = await runDeviceCodeFlow(auth);
   store[cacheKey] = issued;
-  await saveStore(storePath, store);
+  await saveLegacyTokenStore(storePath, store);
   return issued.accessToken;
 }
 
-function resolveAuthConfig(config: ModelConfig): ModelAuthConfig {
+async function resolveFromCredentialRef(
+  config: ModelConfig,
+  auth: CredentialRefAuthConfig
+): Promise<string> {
+  const storePath = defaultCredentialStorePath();
+  const store = await loadCredentialStore(storePath);
+  const entry = store.entries[auth.credentialId];
+  if (!entry) {
+    throw new Error(
+      `Missing credential ID "${auth.credentialId}" in ${storePath}. Run onboarding first.`
+    );
+  }
+
+  if (entry.kind === "api-key") {
+    if (!entry.apiKey) {
+      throw new Error(`Credential "${auth.credentialId}" has empty API key.`);
+    }
+    return entry.apiKey;
+  }
+
+  const providerCredentialMap: Record<string, OAuthCredentials> = {
+    [entry.oauthProviderId]: entry.credentials
+  };
+  const resolved = await getOAuthApiKey(entry.oauthProviderId, providerCredentialMap);
+  if (!resolved) {
+    throw new Error(
+      `Credential "${auth.credentialId}" has no OAuth credentials for provider "${entry.oauthProviderId}".`
+    );
+  }
+
+  const prevExpiry = entry.credentials.expires;
+  if (resolved.newCredentials.expires !== prevExpiry) {
+    store.entries[auth.credentialId] = {
+      kind: "oauth",
+      oauthProviderId: entry.oauthProviderId,
+      credentials: resolved.newCredentials,
+      updatedAt: nowIso()
+    };
+    await saveCredentialStore(store, storePath);
+  }
+
+  return resolved.apiKey;
+}
+
+function resolveAuthConfig(config: ModelConfig): ModelAuthConfig | undefined {
   if (config.auth) {
     return config.auth;
   }
@@ -275,13 +397,22 @@ function resolveAuthConfig(config: ModelConfig): ModelAuthConfig {
       apiKeyEnv: config.apiKeyEnv
     };
   }
-  throw new Error(
-    `Model ${config.model} is missing authentication config. Provide model.auth or model.apiKeyEnv.`
-  );
+  return undefined;
+}
+
+function defaultCredentialIdFor(config: ModelConfig): string {
+  return config.provider;
 }
 
 export async function resolveModelCredential(config: ModelConfig): Promise<string> {
   const auth = resolveAuthConfig(config);
+  if (!auth) {
+    return resolveFromCredentialRef(config, {
+      method: "credential-ref",
+      credentialId: defaultCredentialIdFor(config)
+    });
+  }
+
   if (auth.method === "api-key-env") {
     return resolveFromApiKeyEnv(auth);
   }
@@ -290,6 +421,9 @@ export async function resolveModelCredential(config: ModelConfig): Promise<strin
   }
   if (auth.method === "oauth-device-code") {
     return resolveFromOauthDevice(auth, config);
+  }
+  if (auth.method === "credential-ref") {
+    return resolveFromCredentialRef(config, auth);
   }
   const exhaustive: never = auth;
   throw new Error(`Unsupported auth method: ${JSON.stringify(exhaustive)}`);
