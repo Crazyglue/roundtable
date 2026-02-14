@@ -22,7 +22,11 @@ Persist all deliberation state so sessions are auditable and memory remains usef
   - `events.json`
   - `session.json`
   - `leader-summary.md`
-  - `documentation.md` (when `outputType=documentation`)
+  - `documentation.md` (approved final, when `outputType=documentation`)
+  - `documentation.draft.vN.md` (leader draft/revisions in review loop)
+  - `documentation.review.vN.json` (structured council feedback after failed doc approval vote)
+  - `documentation.unapproved.md` (when review loop ends without approval)
+  - `documentation.unresolved-blockers.json` (remaining blockers for unapproved drafts)
   - `execution-handoff.json` (when execution is requested)
 
 ## Write Strategy
@@ -32,6 +36,7 @@ Persist all deliberation state so sessions are auditable and memory remains usef
 - `*.json` memory files are canonical; `*.md` files are deterministic renderings of those JSON files.
 - Member prompt context is computed from active records scoped to the most recent 25 session IDs (older records remain stored but fade from prompt influence).
 - Session finalization writes resolved state and artifact pointers.
+- Documentation review loop writes draft/review artifacts per revision and only emits `documentation.md` when approval vote passes.
 
 ## Memory Behavior
 

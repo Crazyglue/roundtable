@@ -5,6 +5,9 @@
     "highLevelRounds": 5,
     "implementationRounds": 5
   },
+  "documentationReview": {
+    "maxRevisionRounds": 2
+  },
   "members": [
     {
       "id": "cust_outcomes",

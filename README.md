@@ -27,6 +27,7 @@ Contributor docs: see [`docs/README.md`](docs/README.md).
 9. Motion passes only with strict majority of full council.
 10. If the `HIGH_LEVEL` pass hits round limit without a passing motion, an automatic continuation vote is called.
 11. Implementation runs only if that continuation vote passes; otherwise the session closes.
+12. For `outputType=documentation`, leader draft is council-reviewed: approval vote -> blocker feedback (on failure) -> leader revision -> re-vote (bounded).
 
 Deliberation config example:
 
@@ -35,6 +36,9 @@ Deliberation config example:
   "deliberation": {
     "highLevelRounds": 5,
     "implementationRounds": 5
+  },
+  "documentationReview": {
+    "maxRevisionRounds": 2
   }
 }
 ```
@@ -98,7 +102,11 @@ Under `storage.rootDir/sessions/<session_id>/`:
 - `events.json`: structured event log.
 - `session.json`: final state payload.
 - `leader-summary.md`: final leader entry.
-- `documentation.md` (when `outputType=documentation`): full markdown deliverable generated from the discussion.
+- `documentation.md` (when approved): final markdown deliverable.
+- `documentation.draft.vN.md` (when `outputType=documentation`): leader draft and revisions.
+- `documentation.review.vN.json` (when approval vote fails): structured blocker/suggestion feedback.
+- `documentation.unapproved.md` (when review loop exhausts without approval): final unapproved draft.
+- `documentation.unresolved-blockers.json` (when unapproved): remaining blockers from latest failed review round.
 - `execution-handoff.json` (when needed): executor payload with approval status.
 
 Under `storage.memoryDir/`:

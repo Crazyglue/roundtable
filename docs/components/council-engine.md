@@ -28,8 +28,12 @@ Run the council protocol from start to finish, including:
 6. Start `IMPLEMENTATION` only when continuation vote passes.
 7. `PASS_COMPLETED` for `IMPLEMENTATION` (when run).
 8. Generate leader summary.
-9. Optionally generate output artifact (`documentation.md`).
-   - Documentation output requires explicit known risks and mitigations.
+9. Optionally run documentation review loop (`outputType=documentation`):
+   - leader writes draft (`documentation.draft.v1.md`)
+   - council blind approval vote
+   - if failed, non-YES members submit critical blockers + suggested changes
+   - leader revises and council re-votes (bounded by `documentationReview.maxRevisionRounds`)
+   - approved draft is written as `documentation.md`
 10. Write `SESSION_CLOSED` and refresh memory state from session outcomes.
 
 ## Round-Robin Semantics
@@ -42,6 +46,7 @@ Run the council protocol from start to finish, including:
   - If `HIGH_LEVEL` ends by round limit, continuation to `IMPLEMENTATION` requires a majority continuation vote.
   - `IMPLEMENTATION` ends when a motion passes or `deliberation.implementationRounds` is exhausted.
 - The implementation pass receives the high-level pass resolution as explicit prompt context.
+- Documentation approval is separate from motion voting and uses the same full-council majority rule.
 
 ## Error Handling
 

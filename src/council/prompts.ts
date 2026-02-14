@@ -232,6 +232,94 @@ export function buildContinuationVotePrompt(
   ].join("\n");
 }
 
+export function buildDocumentApprovalVotePrompt(
+  config: CouncilConfig,
+  member: CouncilMemberConfig,
+  draftMarkdown: string,
+  revision: number
+): string {
+  return [
+    `Council Name: ${config.councilName}`,
+    `You are ${member.name} (${member.id}).`,
+    "Stage: DOCUMENT_APPROVAL",
+    `Draft revision: v${revision}`,
+    "",
+    "Vote on whether this draft should be approved as the final documentation artifact.",
+    "Voting rule: majority of FULL council is required. Abstain counts effectively as NO.",
+    "",
+    "Output JSON only:",
+    "Output a single JSON object on one line.",
+    "Do not include literal newline characters in string values; use \\n if needed.",
+    '{"ballot":"YES","rationale":"..."}',
+    '{"ballot":"NO","rationale":"..."}',
+    '{"ballot":"ABSTAIN","rationale":"..."}',
+    "",
+    "Draft:",
+    draftMarkdown
+  ].join("\n");
+}
+
+export function buildDocumentFeedbackPrompt(
+  config: CouncilConfig,
+  member: CouncilMemberConfig,
+  draftMarkdown: string,
+  revision: number
+): string {
+  return [
+    `Council Name: ${config.councilName}`,
+    `You are ${member.name} (${member.id}).`,
+    "Stage: DOCUMENT_FEEDBACK",
+    `Draft revision: v${revision}`,
+    "",
+    "The approval vote did not pass. Provide actionable feedback for the leader.",
+    "Critical blockers are must-fix issues required for your approval.",
+    "Suggested changes are non-blocking improvements.",
+    "",
+    "Output JSON only:",
+    "Output a single JSON object on one line.",
+    "Do not include literal newline characters in string values; use \\n if needed.",
+    '{"criticalBlockers":[{"id":"B1","section":"...","problem":"...","impact":"...","requiredChange":"...","severity":"critical"}],"suggestedChanges":["..."]}',
+    "Limits: max 5 criticalBlockers, max 6 suggestedChanges.",
+    "",
+    "Draft:",
+    draftMarkdown
+  ].join("\n");
+}
+
+export function buildDocumentRevisionPrompt(
+  config: CouncilConfig,
+  leader: CouncilMemberConfig,
+  humanPrompt: string,
+  highLevelResolution: string,
+  implementationResolution: string,
+  currentDraft: string,
+  feedbackJson: string,
+  revision: number
+): string {
+  return [
+    `Council Name: ${config.councilName}`,
+    `Purpose: ${config.purpose}`,
+    `You are leader ${leader.name} (${leader.id}).`,
+    "Stage: DOCUMENT_REVISION",
+    `Write revision: v${revision}`,
+    "",
+    `Original task: ${humanPrompt}`,
+    `High-level plan resolution: ${highLevelResolution}`,
+    `Implementation plan resolution: ${implementationResolution}`,
+    "",
+    "Revise the documentation draft using council feedback.",
+    "Output markdown only. No JSON.",
+    "At top of the document, include section `## Revision Notes (vX)` mapping each blocker id to how it was resolved.",
+    "Address all critical blockers explicitly. If a blocker cannot be fully resolved, state why and residual risk.",
+    "",
+    "Current draft:",
+    currentDraft,
+    "",
+    "Feedback JSON:",
+    feedbackJson
+  ].join("\n");
+}
+
 export function buildLeaderSummaryPrompt(
   config: CouncilConfig,
   leader: CouncilMemberConfig,

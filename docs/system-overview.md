@@ -19,6 +19,7 @@ This project runs a structured multi-agent "council" over a user prompt and can 
    - round-robin discussion within each pass
    - motion seconding
    - blind voting
+   - optional documentation review loop (draft, approval vote, blocker feedback, revision, re-vote)
    - finalization
 4. Session events are written incrementally and memory is refreshed at close from session outcomes.
 5. Session artifacts are written to `.council/sessions/<session_id>/`.
@@ -48,6 +49,7 @@ flowchart TD
 
 - Odd council size, majority of full council for pass.
 - Two-pass deliberation (high-level then implementation) with independently configurable round limits.
+- Documentation artifacts use a bounded council review loop before final approval.
 - Deterministic fallbacks for non-JSON model output.
 - Fail-fast for transport/auth/provider errors.
 - Human approval gate for execution handoff.

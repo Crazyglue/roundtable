@@ -26,6 +26,9 @@ import { makeId, nowIso, sortByStableOrder, toJsonString } from "../utils.js";
 import { MemoryStore } from "../storage/memoryStore.js";
 import { SessionRecorder } from "../storage/sessionRecorder.js";
 import {
+  buildDocumentApprovalVotePrompt,
+  buildDocumentFeedbackPrompt,
+  buildDocumentRevisionPrompt,
   buildContinuationVotePrompt,
   buildDocumentationOutputPrompt,
   buildLeaderElectionPrompt,
@@ -62,10 +65,39 @@ interface RuntimeState {
   turnIndex: number;
 }
 
+interface DocumentCriticalBlocker {
+  id: string;
+  section: string;
+  problem: string;
+  impact: string;
+  requiredChange: string;
+  severity: "critical" | "major";
+}
+
+interface DocumentReviewFeedback {
+  memberId: string;
+  criticalBlockers: DocumentCriticalBlocker[];
+  suggestedChanges: string[];
+}
+
 interface ContinuationVoteResult {
   passed: boolean;
   yesVotes: number;
   noVotesEffective: number;
+}
+
+interface ApprovalVotePair {
+  memberId: string;
+  vote: VoteResponse;
+}
+
+interface DocumentApprovalVoteResult extends ContinuationVoteResult {
+  votePairs: ApprovalVotePair[];
+}
+
+interface DocumentationApprovalOutcome {
+  approved: boolean;
+  outputDocumentFile: string;
 }
 
 export class CouncilOrchestrator {
@@ -235,60 +267,26 @@ export class CouncilOrchestrator {
     await recorder.writeLeaderSummary(leaderSummary.summaryMarkdown);
 
     let outputDocumentFile: string | undefined;
+    let documentationApproved: boolean | undefined;
     if (outputType === "documentation") {
-      outputDocumentFile = path.join(recorder.getArtifacts().sessionDir, "documentation.md");
-      try {
-        const docPrompt = buildDocumentationOutputPrompt(
-          this.config,
-          leader,
-          options.humanPrompt,
-          recorder.getTranscript(),
-          highLevelResult.finalResolution,
-          implementationResult
-            ? leaderSummary.finalResolution
-            : `Implementation pass skipped. ${implementationSkippedReason ?? "Continuation vote failed."}`
-        );
-        const documentation = await this.requireClient(leaderId).completeText(
-          [
-            { role: "system", content: leader.systemPrompt },
-            { role: "user", content: docPrompt }
-          ],
-          { temperature: leader.model.temperature, maxTokens: leader.model.maxTokens }
-        );
-        await writeFile(outputDocumentFile, `${documentation.trim()}\n`, "utf8");
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error("[council] documentation artifact generation failed", {
-          sessionId,
-          leaderId,
-          message
-        });
-        const fallback = [
-          "# System Design",
-          "",
-          "## Executive Summary",
-          leaderSummary.finalResolution,
-          "",
-          "## High-Level Plan Resolution",
-          highLevelResult.finalResolution,
-          "",
-          "## Implementation Plan Resolution",
-          implementationResult
-            ? leaderSummary.finalResolution
-            : `Implementation pass skipped. ${implementationSkippedReason ?? "Continuation vote failed."}`,
-          "",
-          "## Notes",
-          "Generated fallback document due to documentation generation error.",
-          "",
-          "## Session Transcript",
-          recorder.getTranscript()
-        ].join("\n");
-        await writeFile(outputDocumentFile, `${fallback}\n`, "utf8");
-      }
+      const docOutcome = await this.runDocumentationApprovalLoop({
+        sessionId,
+        leader,
+        humanPrompt: options.humanPrompt,
+        highLevelResolution: highLevelResult.finalResolution,
+        implementationResolution: implementationResult
+          ? leaderSummary.finalResolution
+          : `Implementation pass skipped. ${implementationSkippedReason ?? "Continuation vote failed."}`,
+        recorder,
+        appendEvent,
+        state
+      });
+      outputDocumentFile = docOutcome.outputDocumentFile;
+      documentationApproved = docOutcome.approved;
       await appendEvent(
         "OUTPUT_ARTIFACT_WRITTEN",
         totalConfiguredRounds,
-        { outputType, file: outputDocumentFile },
+        { outputType, file: outputDocumentFile, approved: documentationApproved },
         leaderId
       );
     }
@@ -320,6 +318,7 @@ export class CouncilOrchestrator {
         finalResolution: leaderSummary.finalResolution,
         requiresExecution: leaderSummary.requiresExecution,
         executionApproved,
+        documentationApproved: documentationApproved ?? null,
         outputType
       }
     );
@@ -357,6 +356,7 @@ export class CouncilOrchestrator {
       finalResolution: leaderSummary.finalResolution,
       requiresExecution: leaderSummary.requiresExecution,
       executionApproved,
+      documentationApproved: documentationApproved ?? null,
       winningMotion: finalPass.winningMotion,
       outputType,
       outputDocumentFile
@@ -369,6 +369,7 @@ export class CouncilOrchestrator {
       finalResolution: leaderSummary.finalResolution,
       requiresExecution: leaderSummary.requiresExecution,
       executionApproved,
+      documentationApproved,
       outputType,
       artifacts: {
         ...artifacts,
@@ -625,6 +626,328 @@ export class CouncilOrchestrator {
       endedBy,
       finalResolution,
       winningMotion
+    };
+  }
+
+  private async runDocumentationApprovalLoop(input: {
+    sessionId: string;
+    leader: CouncilMemberConfig;
+    humanPrompt: string;
+    highLevelResolution: string;
+    implementationResolution: string;
+    recorder: SessionRecorder;
+    appendEvent: (
+      type: CouncilEvent["type"],
+      round: number,
+      payload: unknown,
+      actorId?: string
+    ) => Promise<void>;
+    state: RuntimeState;
+  }): Promise<DocumentationApprovalOutcome> {
+    const {
+      sessionId,
+      leader,
+      humanPrompt,
+      highLevelResolution,
+      implementationResolution,
+      recorder,
+      appendEvent,
+      state
+    } = input;
+    const sessionDir = recorder.getArtifacts().sessionDir;
+
+    const initialPrompt = buildDocumentationOutputPrompt(
+      this.config,
+      leader,
+      humanPrompt,
+      recorder.getTranscript(),
+      highLevelResolution,
+      implementationResolution
+    );
+    let draft = await this.requireClient(leader.id).completeText(
+      [
+        { role: "system", content: leader.systemPrompt },
+        { role: "user", content: initialPrompt }
+      ],
+      { temperature: leader.model.temperature, maxTokens: leader.model.maxTokens }
+    );
+    draft = draft.trim();
+
+    const maxRevisionRounds = this.config.documentationReview.maxRevisionRounds;
+    let latestFeedback: DocumentReviewFeedback[] = [];
+    for (let revision = 1; revision <= maxRevisionRounds + 1; revision += 1) {
+      const draftFile = path.join(sessionDir, `documentation.draft.v${revision}.md`);
+      await writeFile(draftFile, `${draft}\n`, "utf8");
+      await appendEvent(
+        revision === 1 ? "DOCUMENT_DRAFT_WRITTEN" : "DOCUMENT_REVISION_WRITTEN",
+        revision,
+        { revision, file: draftFile },
+        leader.id
+      );
+
+      const voteResult = await this.runDocumentApprovalVote({
+        sessionId,
+        revision,
+        draftMarkdown: draft,
+        appendEvent,
+        state
+      });
+      if (voteResult.passed) {
+        const approvedFile = path.join(sessionDir, "documentation.md");
+        await writeFile(approvedFile, `${draft}\n`, "utf8");
+        return {
+          approved: true,
+          outputDocumentFile: approvedFile
+        };
+      }
+
+      if (revision > maxRevisionRounds) {
+        break;
+      }
+
+      latestFeedback = await this.collectDocumentFeedback({
+        sessionId,
+        revision,
+        draftMarkdown: draft,
+        votePairs: voteResult.votePairs,
+        appendEvent,
+        state
+      });
+      const feedbackArtifact = path.join(sessionDir, `documentation.review.v${revision}.json`);
+      await writeFile(feedbackArtifact, `${toJsonString(latestFeedback)}\n`, "utf8");
+
+      const revisionPrompt = buildDocumentRevisionPrompt(
+        this.config,
+        leader,
+        humanPrompt,
+        highLevelResolution,
+        implementationResolution,
+        draft,
+        toJsonString(latestFeedback),
+        revision + 1
+      );
+      draft = (
+        await this.requireClient(leader.id).completeText(
+          [
+            { role: "system", content: leader.systemPrompt },
+            { role: "user", content: revisionPrompt }
+          ],
+          { temperature: leader.model.temperature, maxTokens: leader.model.maxTokens }
+        )
+      ).trim();
+    }
+
+    const unapprovedFile = path.join(sessionDir, "documentation.unapproved.md");
+    await writeFile(unapprovedFile, `${draft}\n`, "utf8");
+    const unresolvedBlockers = latestFeedback.flatMap((feedback) =>
+      feedback.criticalBlockers.map((blocker) => ({
+        memberId: feedback.memberId,
+        ...blocker
+      }))
+    );
+    const unresolvedFile = path.join(sessionDir, "documentation.unresolved-blockers.json");
+    await writeFile(unresolvedFile, `${toJsonString(unresolvedBlockers)}\n`, "utf8");
+    return {
+      approved: false,
+      outputDocumentFile: unapprovedFile
+    };
+  }
+
+  private async runDocumentApprovalVote(input: {
+    sessionId: string;
+    revision: number;
+    draftMarkdown: string;
+    appendEvent: (
+      type: CouncilEvent["type"],
+      round: number,
+      payload: unknown,
+      actorId?: string
+    ) => Promise<void>;
+    state: RuntimeState;
+  }): Promise<DocumentApprovalVoteResult> {
+    const { sessionId, revision, draftMarkdown, appendEvent, state } = input;
+    const turnOrder = this.resolveTurnOrder();
+
+    state.phase = "VOTING";
+    await appendEvent("DOCUMENT_APPROVAL_VOTE_CALLED", revision, {
+      revision,
+      voteType: "DOCUMENT_APPROVAL"
+    });
+
+    const votePairs = await Promise.all(
+      turnOrder.map(async (memberId) => {
+        const member = this.requireMember(memberId);
+        const prompt = buildDocumentApprovalVotePrompt(
+          this.config,
+          member,
+          draftMarkdown,
+          revision
+        );
+        const voteRaw = await this.completeJsonSafe<VoteResponse>(
+          this.requireClient(memberId),
+          member.systemPrompt,
+          prompt,
+          { temperature: member.model.temperature, maxTokens: member.model.maxTokens },
+          {
+            stage: "document_approval_vote",
+            sessionId,
+            memberId,
+            round: revision
+          }
+        );
+        return { memberId, vote: normalizeVoteResponse(voteRaw) };
+      })
+    );
+
+    for (const pair of votePairs) {
+      await appendEvent(
+        "VOTE_CAST",
+        revision,
+        { voteType: "DOCUMENT_APPROVAL", revision, ...pair.vote },
+        pair.memberId
+      );
+    }
+
+    const passResult = this.computeVotePass(votePairs.map((item) => item.vote.ballot));
+    await appendEvent("DOCUMENT_APPROVAL_VOTE_RESULT", revision, {
+      revision,
+      passed: passResult.passed,
+      yesVotes: passResult.yesVotes,
+      noVotesEffective: passResult.noVotesEffective,
+      totalCouncilSize: turnOrder.length
+    });
+    state.phase = "DISCUSSION";
+    return {
+      ...passResult,
+      votePairs
+    };
+  }
+
+  private async collectDocumentFeedback(input: {
+    sessionId: string;
+    revision: number;
+    draftMarkdown: string;
+    votePairs: ApprovalVotePair[];
+    appendEvent: (
+      type: CouncilEvent["type"],
+      round: number,
+      payload: unknown,
+      actorId?: string
+    ) => Promise<void>;
+    state: RuntimeState;
+  }): Promise<DocumentReviewFeedback[]> {
+    const { sessionId, revision, draftMarkdown, votePairs, appendEvent, state } = input;
+    const reviewerIds = votePairs
+      .filter((pair) => pair.vote.ballot !== "YES")
+      .map((pair) => pair.memberId);
+    if (reviewerIds.length === 0) {
+      return [];
+    }
+
+    state.phase = "DISCUSSION";
+    const feedback = await Promise.all(
+      reviewerIds.map(async (memberId) => {
+        const member = this.requireMember(memberId);
+        const prompt = buildDocumentFeedbackPrompt(
+          this.config,
+          member,
+          draftMarkdown,
+          revision
+        );
+        const raw = await this.completeJsonSafe<unknown>(
+          this.requireClient(memberId),
+          member.systemPrompt,
+          prompt,
+          { temperature: member.model.temperature, maxTokens: member.model.maxTokens },
+          {
+            stage: "document_feedback",
+            sessionId,
+            memberId,
+            round: revision
+          }
+        );
+        const normalized = this.normalizeDocumentFeedback(raw, memberId);
+        await appendEvent(
+          "DOCUMENT_FEEDBACK_SUBMITTED",
+          revision,
+          {
+            revision,
+            criticalBlockerCount: normalized.criticalBlockers.length,
+            suggestedChangeCount: normalized.suggestedChanges.length
+          },
+          memberId
+        );
+        return normalized;
+      })
+    );
+    return feedback;
+  }
+
+  private normalizeDocumentFeedback(raw: unknown, memberId: string): DocumentReviewFeedback {
+    if (!raw || typeof raw !== "object") {
+      return {
+        memberId,
+        criticalBlockers: [
+          {
+            id: "B0",
+            section: "unknown",
+            problem: "Feedback response was not valid JSON object.",
+            impact: "Leader cannot reliably resolve reviewer blockers.",
+            requiredChange: "Re-run review with strict JSON schema compliance.",
+            severity: "critical"
+          }
+        ],
+        suggestedChanges: []
+      };
+    }
+
+    const candidate = raw as {
+      criticalBlockers?: unknown;
+      suggestedChanges?: unknown;
+    };
+    const criticalBlockersRaw = Array.isArray(candidate.criticalBlockers)
+      ? candidate.criticalBlockers
+      : [];
+    const criticalBlockers: DocumentCriticalBlocker[] = criticalBlockersRaw
+      .map((value, index) => {
+        if (!value || typeof value !== "object") {
+          return null;
+        }
+        const item = value as Record<string, unknown>;
+        const severity = item.severity === "major" ? "major" : "critical";
+        const id = typeof item.id === "string" && item.id.trim() ? item.id.trim() : `B${index + 1}`;
+        const section = typeof item.section === "string" ? item.section.trim() : "";
+        const problem = typeof item.problem === "string" ? item.problem.trim() : "";
+        const impact = typeof item.impact === "string" ? item.impact.trim() : "";
+        const requiredChange =
+          typeof item.requiredChange === "string" ? item.requiredChange.trim() : "";
+        if (!section || !problem || !impact || !requiredChange) {
+          return null;
+        }
+        return {
+          id,
+          section,
+          problem,
+          impact,
+          requiredChange,
+          severity
+        };
+      })
+      .filter((value): value is DocumentCriticalBlocker => value !== null)
+      .slice(0, 5);
+
+    const suggestedChanges = Array.isArray(candidate.suggestedChanges)
+      ? candidate.suggestedChanges
+          .filter((value): value is string => typeof value === "string")
+          .map((value) => value.trim())
+          .filter(Boolean)
+          .slice(0, 6)
+      : [];
+
+    return {
+      memberId,
+      criticalBlockers,
+      suggestedChanges
     };
   }
 

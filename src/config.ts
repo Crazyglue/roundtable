@@ -1,6 +1,11 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { CouncilConfig, DeliberationConfig, ModelAuthConfig } from "./types.js";
+import {
+  CouncilConfig,
+  DeliberationConfig,
+  DocumentationReviewConfig,
+  ModelAuthConfig
+} from "./types.js";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -83,9 +88,25 @@ export async function loadConfig(configPath: string): Promise<CouncilConfig> {
   const members = parsed.members as CouncilConfig["members"];
   const storage = parsed.storage as CouncilConfig["storage"];
   const execution = parsed.execution as CouncilConfig["execution"];
+  const documentationReviewCandidate = parsed.documentationReview as
+    | Partial<DocumentationReviewConfig>
+    | undefined;
+  if (documentationReviewCandidate !== undefined) {
+    assert(typeof documentationReviewCandidate === "object", "documentationReview must be an object");
+    if (documentationReviewCandidate.maxRevisionRounds !== undefined) {
+      assert(
+        Number.isInteger(documentationReviewCandidate.maxRevisionRounds) &&
+          documentationReviewCandidate.maxRevisionRounds >= 0,
+        "documentationReview.maxRevisionRounds must be an integer >= 0"
+      );
+    }
+  }
   const deliberation: DeliberationConfig = {
     highLevelRounds: deliberationCandidate?.highLevelRounds ?? defaultRounds,
     implementationRounds: deliberationCandidate?.implementationRounds ?? defaultRounds
+  };
+  const documentationReview: DocumentationReviewConfig = {
+    maxRevisionRounds: documentationReviewCandidate?.maxRevisionRounds ?? 2
   };
 
   for (const member of members) {
@@ -116,6 +137,7 @@ export async function loadConfig(configPath: string): Promise<CouncilConfig> {
     purpose: parsed.purpose,
     maxRounds: parsed.maxRounds,
     deliberation,
+    documentationReview,
     members,
     turnOrder: parsed.turnOrder,
     storage,

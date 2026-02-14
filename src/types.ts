@@ -6,6 +6,11 @@ export type EventType =
   | "PASS_COMPLETED"
   | "CONTINUATION_VOTE_CALLED"
   | "CONTINUATION_VOTE_RESULT"
+  | "DOCUMENT_DRAFT_WRITTEN"
+  | "DOCUMENT_APPROVAL_VOTE_CALLED"
+  | "DOCUMENT_APPROVAL_VOTE_RESULT"
+  | "DOCUMENT_FEEDBACK_SUBMITTED"
+  | "DOCUMENT_REVISION_WRITTEN"
   | "LEADER_ELECTION_BALLOT"
   | "LEADER_ELECTED"
   | "ROUND_STARTED"
@@ -164,11 +169,16 @@ export interface DeliberationConfig {
   implementationRounds: number;
 }
 
+export interface DocumentationReviewConfig {
+  maxRevisionRounds: number;
+}
+
 export interface CouncilConfig {
   councilName: string;
   purpose: string;
   maxRounds?: number;
   deliberation: DeliberationConfig;
+  documentationReview: DocumentationReviewConfig;
   members: CouncilMemberConfig[];
   turnOrder?: string[];
   storage: {
@@ -196,6 +206,7 @@ export interface SessionResult {
   finalResolution: string;
   requiresExecution: boolean;
   executionApproved: boolean;
+  documentationApproved?: boolean;
   outputType: CouncilOutputType;
   artifacts: {
     sessionDir: string;
