@@ -5,7 +5,7 @@
 Run the council protocol from start to finish, including:
 
 - leader election
-- two-pass turn-based deliberation (`HIGH_LEVEL` then `IMPLEMENTATION`)
+- configurable phase-graph deliberation
 - motions, seconding, voting
 - final leader summary
 - optional output artifact generation
@@ -20,32 +20,30 @@ Run the council protocol from start to finish, including:
 
 1. `SESSION_STARTED`
 2. Leader election ballots -> `LEADER_ELECTED`
-3. `PASS_STARTED` for `HIGH_LEVEL`; for each round/member:
-   - `TURN_ACTION`
+3. Start at `sessionPolicy.entryPhaseId`; for each phase:
+   - `PASS_STARTED`
+   - for each round/member: `TURN_ACTION`
    - if motion called: seconding + voting
-4. `PASS_COMPLETED` for `HIGH_LEVEL`.
-5. If `HIGH_LEVEL` ended by round limit: run automatic continuation vote.
-6. Start `IMPLEMENTATION` only when continuation vote passes.
-7. `PASS_COMPLETED` for `IMPLEMENTATION` (when run).
-8. Generate leader summary.
-9. Optionally run documentation review loop (`outputType=documentation`):
+4. `PASS_COMPLETED` and resolve next phase from transition/fallback config.
+5. Generate leader summary.
+6. Optionally run documentation review loop (`output.type=documentation`):
    - leader writes draft (`documentation.draft.v1.md`)
    - council blind approval vote
    - if failed, non-YES members submit critical blockers + suggested changes
    - leader revises and council re-votes (bounded by `documentationReview.maxRevisionRounds`)
    - approved draft is written as `documentation.md`
-10. Write `SESSION_CLOSED` and refresh memory state from session outcomes.
+7. Write `SESSION_CLOSED` and refresh memory state from session outcomes.
 
 ## Round-Robin Semantics
 
 - Turn order comes from `turnOrder` config (or member declaration order when omitted).
-- In each pass, each round gives exactly one turn to each member in turn-order sequence.
+- In each phase, each round gives exactly one turn to each member in turn-order sequence.
 - `CALL_VOTE` interrupts discussion to run seconding/voting, then returns to discussion unless the motion passes.
-- Round limits are pass-scoped:
-  - `HIGH_LEVEL` ends when a motion passes or `deliberation.highLevelRounds` is exhausted.
-  - If `HIGH_LEVEL` ends by round limit, continuation to `IMPLEMENTATION` requires a majority continuation vote.
-  - `IMPLEMENTATION` ends when a motion passes or `deliberation.implementationRounds` is exhausted.
-- The implementation pass receives the high-level pass resolution as explicit prompt context.
+- Round limits are phase-scoped from `phase.stopConditions.maxRounds`.
+- Vote pass/fail is phase-scoped from `phase.governance`.
+- Next phase is selected from configured `transitions` filtered by phase outcome (`MAJORITY_VOTE`, `ROUND_LIMIT`, or `ALWAYS`).
+- On round-limit without matching transition, `phase.fallback` determines whether to end or force a transition.
+- Prompts include a phase context packet (current phase, graph digest, progress, legal transitions).
 - Documentation approval is separate from motion voting and uses the same full-council majority rule.
 
 ## Error Handling
@@ -60,7 +58,8 @@ Run the council protocol from start to finish, including:
 ## Extension Points
 
 - Add new output types in:
-  - `SessionRunOptions.outputType` (`src/types.ts`)
+  - `OutputConfig.type` (`src/types.ts`)
+  - config schema in `src/config.ts`
   - orchestration finalization branch (`src/council/orchestrator.ts`)
   - prompts and normalizers (`src/council/prompts.ts`)
 - Adjust voting semantics in `computeVotePass()`.

@@ -22,7 +22,7 @@ Persist all deliberation state so sessions are auditable and memory remains usef
   - `events.json`
   - `session.json`
   - `leader-summary.md`
-  - `documentation.md` (approved final, when `outputType=documentation`)
+  - `documentation.md` (approved final, when `output.type=documentation`)
   - `documentation.draft.vN.md` (leader draft/revisions in review loop)
   - `documentation.review.vN.json` (structured council feedback after failed doc approval vote)
   - `documentation.unapproved.md` (when review loop ends without approval)

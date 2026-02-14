@@ -4,6 +4,8 @@ import {
   CouncilMemberConfig,
   LeaderElectionBallot,
   LeaderSummary,
+  PhaseContextPacket,
+  PhaseGovernanceConfig,
   SecondingResponse,
   TurnAction,
   VoteResponse
@@ -35,32 +37,15 @@ export interface TurnPromptInput {
   humanPrompt: string;
   transcript: string;
   memberMemory: string;
-  passId: "HIGH_LEVEL" | "IMPLEMENTATION";
-  passObjective: string;
-  priorPassResolution?: string;
+  phaseId: string;
+  phaseGoal: string;
+  phaseContext: PhaseContextPacket;
   currentRound: number;
   maxRounds: number;
   turnsRemainingForSpeaker: number;
 }
 
 export function buildTurnPrompt(input: TurnPromptInput): string {
-  const passGuidance =
-    input.passId === "HIGH_LEVEL"
-      ? [
-          "Pass guidance:",
-          "- Focus on architecture direction, decision boundaries, and tradeoffs.",
-          "- Propose measurable acceptance criteria that implementation should satisfy.",
-          "- Surface known risks and unknowns that could cause later delivery, reliability, or cost issues.",
-          "- Keep technology picks provisional unless strict constraints force a choice."
-        ]
-      : [
-          "Pass guidance:",
-          "- Convert the plan into concrete implementation details and defaults.",
-          "- Specify APIs, data/resource model, scheduling behavior, coordination backend, and failure handling.",
-          "- Turn each known risk into concrete mitigations, detection signals, and contingency actions.",
-          "- Replace vague statements with explicit, defensible decisions."
-        ];
-
   const lastChance =
     input.turnsRemainingForSpeaker === 1
       ? "This is your last scheduled turn. Make your strongest argument now if needed."
@@ -70,9 +55,11 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     `Council Name: ${input.config.councilName}`,
     `Council Purpose: ${input.config.purpose}`,
     `Task Prompt: ${input.humanPrompt}`,
-    `Deliberation Pass: ${input.passId}`,
-    `Pass Objective: ${input.passObjective}`,
-    input.priorPassResolution ? `Prior pass resolution: ${input.priorPassResolution}` : undefined,
+    `Current Phase: ${input.phaseId}`,
+    `Phase Goal: ${input.phaseGoal}`,
+    input.phaseContext.currentPhase.priorPhaseResolution
+      ? `Prior phase resolution: ${input.phaseContext.currentPhase.priorPhaseResolution}`
+      : undefined,
     "",
     `You are: ${input.member.name} (${input.member.id})`,
     `Role: ${input.member.role}`,
@@ -83,7 +70,18 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     `Turns remaining for you (including this turn): ${input.turnsRemainingForSpeaker}`,
     lastChance,
     "",
-    ...passGuidance,
+    "Phase guidance:",
+    ...(input.phaseContext.currentPhase.promptGuidance.length > 0
+      ? input.phaseContext.currentPhase.promptGuidance.map((item) => `- ${item}`)
+      : ["- No extra guidance configured."]),
+    "",
+    "Current-phase guardrails:",
+    "- Focus on the active phase goal, gates, and deliverables.",
+    "- Do not produce outputs that belong to later phases unless explicitly required now.",
+    "- If evidence requirements are unmet, call out concrete gaps before proposing closure.",
+    "",
+    "Phase Context Packet:",
+    renderPhaseContextPacket(input.phaseContext),
     "",
     "Town-hall rules:",
     "- You may take exactly one action this turn: CONTRIBUTE, PASS, or CALL_VOTE.",
@@ -115,6 +113,57 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     .join("\n");
 }
 
+function renderPhaseContextPacket(packet: PhaseContextPacket): string {
+  const lines: string[] = [];
+  lines.push(`- Verbosity: ${packet.verbosity}`);
+  lines.push(
+    `- Current: ${packet.currentPhase.id} (round ${packet.currentPhase.round}/${packet.currentPhase.maxRounds})`
+  );
+  lines.push(`- Goal: ${packet.currentPhase.goal}`);
+  const deliverablesPending =
+    packet.progressState.deliverablesPending.length > 0
+      ? packet.progressState.deliverablesPending.join(", ")
+      : "none";
+  const gatesPending =
+    packet.progressState.qualityGatesPending.length > 0
+      ? packet.progressState.qualityGatesPending.join(", ")
+      : "none";
+  const evidenceGaps =
+    packet.progressState.openEvidenceGaps.length > 0
+      ? packet.progressState.openEvidenceGaps.join("; ")
+      : "none";
+  lines.push(`- Pending deliverables: ${deliverablesPending}`);
+  lines.push(`- Pending quality gates: ${gatesPending}`);
+  lines.push(`- Open evidence gaps: ${evidenceGaps}`);
+  if (packet.transitionHints.length > 0) {
+    lines.push(
+      `- Legal next phases: ${packet.transitionHints
+        .map((hint) => `${hint.to} (${hint.when})`)
+        .join(", ")}`
+    );
+  } else {
+    lines.push("- Legal next phases: none (session may close after this phase).");
+  }
+
+  if (packet.verbosity !== "minimal") {
+    lines.push("- Graph digest:");
+    for (const node of packet.graphDigest.nodes) {
+      const transitions =
+        node.transitions.length > 0
+          ? node.transitions.map((transition) => `${transition.to}:${transition.when}`).join(", ")
+          : "none";
+      lines.push(`  - ${node.id}: ${node.goal} -> ${transitions}`);
+    }
+  }
+
+  if (packet.verbosity === "full") {
+    lines.push("- Full packet JSON:");
+    lines.push(JSON.stringify(packet));
+  }
+
+  return lines.join("\n");
+}
+
 export function buildLeaderElectionPrompt(
   config: CouncilConfig,
   member: CouncilMemberConfig,
@@ -143,14 +192,14 @@ export function buildSecondingPrompt(
   member: CouncilMemberConfig,
   motion: Motion,
   transcript: string,
-  passId: "HIGH_LEVEL" | "IMPLEMENTATION",
-  passObjective: string
+  phaseId: string,
+  phaseGoal: string
 ): string {
   return [
     `Council Name: ${config.councilName}`,
     `You are ${member.name} (${member.id}).`,
-    `Deliberation Pass: ${passId}`,
-    `Pass Objective: ${passObjective}`,
+    `Current Phase: ${phaseId}`,
+    `Phase Goal: ${phaseGoal}`,
     "",
     "A motion has been called. Decide whether to second it.",
     `Motion title: ${motion.motionTitle}`,
@@ -173,21 +222,25 @@ export function buildVotePrompt(
   member: CouncilMemberConfig,
   motion: Motion,
   transcript: string,
-  passId: "HIGH_LEVEL" | "IMPLEMENTATION",
-  passObjective: string
+  phaseId: string,
+  phaseGoal: string,
+  governance: PhaseGovernanceConfig
 ): string {
   return [
     `Council Name: ${config.councilName}`,
     `You are ${member.name} (${member.id}).`,
-    `Deliberation Pass: ${passId}`,
-    `Pass Objective: ${passObjective}`,
+    `Current Phase: ${phaseId}`,
+    `Phase Goal: ${phaseGoal}`,
     "",
     "A motion has been seconded. Cast a blind ballot.",
     `Motion title: ${motion.motionTitle}`,
     `Motion text: ${motion.motionText}`,
     `Decision if pass: ${motion.decisionIfPass}`,
     "",
-    "Voting rule: majority of FULL council is required. Abstain counts effectively as NO.",
+    `Voting rule: YES ratio must meet threshold ${governance.majorityThreshold.toFixed(2)} of full council.`,
+    governance.abstainCountsAsNo
+      ? "Abstain counts effectively as NO for the decision."
+      : "Abstain is neutral and does not count as NO.",
     "",
     "Output JSON only:",
     "Output a single JSON object on one line.",
@@ -204,17 +257,21 @@ export function buildVotePrompt(
 export function buildContinuationVotePrompt(
   config: CouncilConfig,
   member: CouncilMemberConfig,
-  highLevelResolution: string,
+  phaseId: string,
+  phaseGoal: string,
+  currentResolution: string,
+  nextPhaseId: string,
   transcript: string
 ): string {
   return [
     `Council Name: ${config.councilName}`,
     `You are ${member.name} (${member.id}).`,
-    "Deliberation Pass: HIGH_LEVEL",
+    `Current Phase: ${phaseId}`,
+    `Phase Goal: ${phaseGoal}`,
     "",
-    "The HIGH_LEVEL pass reached its round limit. An automatic continuation vote has been called.",
-    `Current high-level resolution: ${highLevelResolution}`,
-    "Question: Should the council continue to the IMPLEMENTATION pass?",
+    `The ${phaseId} phase reached its round limit. A continuation vote has been called.`,
+    `Current phase resolution: ${currentResolution}`,
+    `Question: Should the council continue to the ${nextPhaseId} phase?`,
     "",
     "Vote YES only if there is enough aligned direction to proceed to implementation specifics.",
     "Vote NO if the session should end now.",
@@ -290,8 +347,7 @@ export function buildDocumentRevisionPrompt(
   config: CouncilConfig,
   leader: CouncilMemberConfig,
   humanPrompt: string,
-  highLevelResolution: string,
-  implementationResolution: string,
+  phaseResolutionSummary: string,
   currentDraft: string,
   feedbackJson: string,
   revision: number
@@ -304,8 +360,8 @@ export function buildDocumentRevisionPrompt(
     `Write revision: v${revision}`,
     "",
     `Original task: ${humanPrompt}`,
-    `High-level plan resolution: ${highLevelResolution}`,
-    `Implementation plan resolution: ${implementationResolution}`,
+    "Session phase resolutions:",
+    phaseResolutionSummary,
     "",
     "Revise the documentation draft using council feedback.",
     "Output markdown only. No JSON.",
@@ -363,8 +419,7 @@ export function buildDocumentationOutputPrompt(
   leader: CouncilMemberConfig,
   humanPrompt: string,
   transcript: string,
-  highLevelResolution: string,
-  implementationResolution: string
+  phaseResolutionSummary: string
 ): string {
   return [
     `Council Name: ${config.councilName}`,
@@ -372,8 +427,8 @@ export function buildDocumentationOutputPrompt(
     `You are leader ${leader.name} (${leader.id}).`,
     "",
     `Original task: ${humanPrompt}`,
-    `High-level plan resolution: ${highLevelResolution}`,
-    `Implementation plan resolution: ${implementationResolution}`,
+    "Session phase resolutions:",
+    phaseResolutionSummary,
     "",
     "Generate a complete markdown document from the council discussion.",
     "Output markdown only. No JSON.",

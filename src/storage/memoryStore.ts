@@ -653,8 +653,9 @@ export class MemoryStore {
       `- Updated: ${council.updatedAt}`,
       `- Council Name: ${this.config.councilName}`,
       `- Purpose: ${this.config.purpose}`,
-      `- Deliberation Rounds: high-level=${this.config.deliberation.highLevelRounds}, implementation=${this.config.deliberation.implementationRounds}`,
-      "- Voting Rule: Majority of full council (abstentions count as NO)",
+      `- Entry Phase: ${this.config.sessionPolicy.entryPhaseId}`,
+      `- Max Phase Transitions: ${this.config.sessionPolicy.maxPhaseTransitions}`,
+      "- Voting Rule: Per-phase governance thresholds (see session config)",
       ""
     ];
 

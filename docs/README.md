@@ -13,7 +13,7 @@ This folder contains high-level architecture and component docs for contributors
 
 ## Examples
 
-- `docs/examples/` contains captured session artifacts (transcript/events/session state/output docs) that illustrate the current two-pass deliberation protocol.
+- `docs/examples/` contains captured session artifacts (transcript/events/session state/output docs) from an earlier run; useful for artifact format reference.
 
 ## Suggested Reading Order
 

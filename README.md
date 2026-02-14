@@ -6,7 +6,7 @@ A self-hosted council runtime for structured multi-agent deliberation with:
 - Round-robin town-hall turns.
 - Turn actions: `CONTRIBUTE`, `PASS`, `CALL_VOTE`.
 - Motion seconding and blind voting.
-- Majority-of-full-council voting (`ABSTAIN` effectively counts as `NO`).
+- Phase-configurable voting thresholds and abstention handling.
 - Structured per-member memory (`MEMORY.json`) with rendered markdown snapshots.
 - Full session recording and review artifacts.
 - Final leader summary entry.
@@ -17,29 +17,46 @@ Contributor docs: see [`docs/README.md`](docs/README.md).
 ## Protocol Rules Implemented
 
 1. Each member gets one turn per round.
-2. Sessions run in two passes: `HIGH_LEVEL` then `IMPLEMENTATION`.
-3. Rounds are configurable per pass (`deliberation.highLevelRounds` and `deliberation.implementationRounds`, defaults 5/5).
-4. Members are aware of pass objective and remaining rounds/turns in prompts.
-5. Turn order is deterministic (`turnOrder` when set, else member declaration order).
-6. `CALL_VOTE` pauses discussion for seconding.
-7. If no second, discussion resumes.
-8. If seconded, blind ballots are collected in parallel.
-9. Motion passes only with strict majority of full council.
-10. If the `HIGH_LEVEL` pass hits round limit without a passing motion, an automatic continuation vote is called.
-11. Implementation runs only if that continuation vote passes; otherwise the session closes.
-12. For `outputType=documentation`, leader draft is council-reviewed: approval vote -> blocker feedback (on failure) -> leader revision -> re-vote (bounded).
+2. Sessions run through a configurable phase graph from `sessionPolicy.entryPhaseId`.
+3. Each phase controls its own rounds, governance, fallback behavior, and transitions.
+4. Members receive a phase-context packet in prompts (current phase + distilled graph + progress hints).
+5. Final output artifact type is configured in `output.type` (`none` or `documentation`).
+6. Turn order is deterministic (`turnOrder` when set, else member declaration order).
+7. `CALL_VOTE` pauses discussion for seconding.
+8. If no second, discussion resumes.
+9. If seconded, blind ballots are collected in parallel.
+10. Motion pass thresholds are phase-configurable (`governance.majorityThreshold`, `abstainCountsAsNo`).
+11. If a phase reaches round limit, configured fallback and transition rules decide next step.
+12. For `output.type=documentation`, leader draft is council-reviewed: approval vote -> blocker feedback (on failure) -> leader revision -> re-vote (bounded).
 
-Deliberation config example:
+Session policy config example:
 
 ```json
 {
-  "deliberation": {
-    "highLevelRounds": 5,
-    "implementationRounds": 5
+  "sessionPolicy": {
+    "entryPhaseId": "high_level",
+    "maxPhaseTransitions": 8,
+    "phaseContextVerbosity": "standard"
+  },
+  "phases": [
+    {
+      "id": "high_level",
+      "goal": "Define solution boundaries and success metrics",
+      "stopConditions": { "maxRounds": 5, "endOnMajorityVote": true },
+      "fallback": {
+        "resolution": "No majority high-level direction reached within configured rounds.",
+        "action": "END_SESSION"
+      },
+      "transitions": [{ "to": "implementation", "when": "MAJORITY_VOTE", "priority": 0 }]
+    }
+  ],
+  "output": {
+    "type": "documentation"
   },
   "documentationReview": {
     "maxRevisionRounds": 2
-  }
+  },
+  "turnOrder": ["cust_outcomes", "scalability", "delivery_realist"]
 }
 ```
 
@@ -80,15 +97,7 @@ npm run build
 npm run start -- run --config council.config.json --prompt "Review the architecture direction for multi-tenant event ingestion."
 ```
 
-5. Optional structured output artifact:
-
-```bash
-npm run start -- run --config council.config.json --output-type documentation --prompt "Create a system design for a tiny-url app"
-# alternatively inline in prompt:
-npm run start -- run --config council.config.json --prompt "[output:documentation] Create a system design for a tiny-url app"
-```
-
-6. Optional execution approval:
+5. Optional execution approval:
 
 ```bash
 npm run start -- run --config council.config.json --prompt "..." --approve-execution
@@ -103,7 +112,7 @@ Under `storage.rootDir/sessions/<session_id>/`:
 - `session.json`: final state payload.
 - `leader-summary.md`: final leader entry.
 - `documentation.md` (when approved): final markdown deliverable.
-- `documentation.draft.vN.md` (when `outputType=documentation`): leader draft and revisions.
+- `documentation.draft.vN.md` (when `output.type=documentation`): leader draft and revisions.
 - `documentation.review.vN.json` (when approval vote fails): structured blocker/suggestion feedback.
 - `documentation.unapproved.md` (when review loop exhausts without approval): final unapproved draft.
 - `documentation.unresolved-blockers.json` (when unapproved): remaining blockers from latest failed review round.

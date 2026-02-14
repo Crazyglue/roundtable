@@ -1,9 +1,120 @@
 {
   "councilName": "System Design Council",
-  "purpose": "Produce both a high-level plan and implementation-specific decisions for system-level prompts.",
-  "deliberation": {
-    "highLevelRounds": 5,
-    "implementationRounds": 5
+  "purpose": "Produce phased architecture and implementation decisions for system-level prompts.",
+  "sessionPolicy": {
+    "entryPhaseId": "high_level",
+    "maxPhaseTransitions": 8,
+    "phaseContextVerbosity": "standard"
+  },
+  "phases": [
+    {
+      "id": "high_level",
+      "goal": "Define solution boundaries, options, and success metrics.",
+      "promptGuidance": [
+        "Prioritize architecture boundaries and key tradeoffs.",
+        "Defer low-level details unless required for risk clarity."
+      ],
+      "deliverables": [
+        {
+          "id": "options_matrix",
+          "description": "At least two viable architecture options with tradeoffs.",
+          "required": true
+        },
+        {
+          "id": "acceptance_criteria",
+          "description": "Measurable success criteria for downstream implementation.",
+          "required": true
+        }
+      ],
+      "governance": {
+        "requireSeconding": true,
+        "majorityThreshold": 0.5,
+        "abstainCountsAsNo": true
+      },
+      "stopConditions": {
+        "maxRounds": 5,
+        "endOnMajorityVote": true
+      },
+      "memoryPolicy": {
+        "readMemberMemory": true,
+        "writeMemberMemory": true,
+        "writeCouncilMemory": true,
+        "includePriorPhaseSummary": true
+      },
+      "evidenceRequirements": {
+        "minCitations": 0,
+        "requireExplicitAssumptions": true,
+        "requireRiskRegister": true
+      },
+      "qualityGates": [
+        "Includes explicit assumptions and top risks.",
+        "Defines acceptance criteria for implementation."
+      ],
+      "fallback": {
+        "resolution": "No majority high-level direction reached within configured rounds.",
+        "action": "END_SESSION"
+      },
+      "transitions": [
+        {
+          "to": "implementation",
+          "when": "MAJORITY_VOTE",
+          "reason": "Proceed to concrete implementation design.",
+          "priority": 0
+        }
+      ]
+    },
+    {
+      "id": "implementation",
+      "goal": "Convert approved direction into concrete implementation mechanics.",
+      "promptGuidance": [
+        "Specify APIs, data/state model, failure handling, and rollout sequencing.",
+        "Turn risks into concrete mitigations and monitoring."
+      ],
+      "deliverables": [
+        {
+          "id": "implementation_plan",
+          "description": "Concrete technical plan with explicit defaults.",
+          "required": true
+        },
+        {
+          "id": "rollout_plan",
+          "description": "Phased delivery plan with testable checkpoints.",
+          "required": true
+        }
+      ],
+      "governance": {
+        "requireSeconding": true,
+        "majorityThreshold": 0.5,
+        "abstainCountsAsNo": true
+      },
+      "stopConditions": {
+        "maxRounds": 5,
+        "endOnMajorityVote": true
+      },
+      "memoryPolicy": {
+        "readMemberMemory": true,
+        "writeMemberMemory": true,
+        "writeCouncilMemory": true,
+        "includePriorPhaseSummary": true
+      },
+      "evidenceRequirements": {
+        "minCitations": 0,
+        "requireExplicitAssumptions": true,
+        "requireRiskRegister": true
+      },
+      "qualityGates": [
+        "Defines operational failure modes and mitigations.",
+        "Includes rollout checkpoints and acceptance tests."
+      ],
+      "fallback": {
+        "resolution": "No majority implementation plan reached within configured rounds.",
+        "action": "END_SESSION"
+      },
+      "transitions": []
+    }
+  ],
+  "output": {
+    "type": "documentation"
   },
   "documentationReview": {
     "maxRevisionRounds": 2
@@ -13,7 +124,7 @@
       "id": "cust_outcomes",
       "name": "Customer Outcomes Member",
       "role": "Customer Advocate",
-      "systemPrompt": "You optimize for customer impact, clarity, and value delivery while remaining pragmatic. In high-level pass, drive acceptance criteria; in implementation pass, require concrete API and UX behaviors.",
+      "systemPrompt": "You optimize for customer impact, clarity, and value delivery while remaining pragmatic. In early phases drive acceptance criteria; in later phases require concrete API and UX behavior.",
       "traits": ["customer-first", "clarity", "risk-aware"],
       "focusWeights": {
         "customer_outcome": 0.5,
@@ -37,7 +148,7 @@
       "id": "scalability",
       "name": "Scalability Member",
       "role": "Platform Architect",
-      "systemPrompt": "You focus on long-term scalability, resilience, and operability under growth. In implementation pass, force concrete scheduling, coordination, and failure-mode mechanics.",
+      "systemPrompt": "You focus on long-term scalability, resilience, and operability under growth. In implementation phases force concrete scheduling, coordination, and failure-mode mechanics.",
       "traits": ["systems-thinking", "performance", "operations"],
       "focusWeights": {
         "scalability": 0.45,

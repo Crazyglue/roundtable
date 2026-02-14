@@ -2,7 +2,6 @@ import path from "node:path";
 import { loadConfig } from "./config.js";
 import { CouncilOrchestrator } from "./council/orchestrator.js";
 import { runOnboarding } from "./onboarding/onboard.js";
-import { CouncilOutputType } from "./types.js";
 
 interface CliArgs {
   command: string;
@@ -10,7 +9,6 @@ interface CliArgs {
   credentialStorePath?: string;
   prompt: string;
   approveExecution: boolean;
-  outputType: CouncilOutputType;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -31,23 +29,12 @@ function parseArgs(argv: string[]): CliArgs {
     }
   }
 
-  const outputTypeFlag = map.get("--output-type");
-  const outputType: CouncilOutputType =
-    outputTypeFlag === "documentation" ? "documentation" : "none";
-  const promptValue = map.get("--prompt") ?? "";
-  const inlineOutputTypeMatch = promptValue.match(/\[output:(documentation)\]/i);
-  const inlineOutputType = inlineOutputTypeMatch?.[1]?.toLowerCase() as
-    | "documentation"
-    | undefined;
-  const cleanedPrompt = promptValue.replace(/\[output:(documentation)\]/ig, "").trim();
-
   return {
     command: command ?? "run",
     configPath: map.get("--config") ?? "council.config.json",
     credentialStorePath: map.get("--credentials"),
-    prompt: cleanedPrompt,
-    approveExecution: flags.has("--approve-execution"),
-    outputType: inlineOutputType ?? outputType
+    prompt: (map.get("--prompt") ?? "").trim(),
+    approveExecution: flags.has("--approve-execution")
   };
 }
 
@@ -61,7 +48,6 @@ function usage(): string {
     "  --config <path>            Path to council config JSON",
     "  --credentials <path>       Path to credential store JSON",
     "  --prompt <text>            Human task prompt",
-    "  --output-type <type>       Output artifact type (documentation)",
     "  --approve-execution        Mark execution handoff as approved"
   ].join("\n");
 }
@@ -88,8 +74,7 @@ async function main(): Promise<void> {
   const orchestrator = new CouncilOrchestrator(config);
   const result = await orchestrator.run({
     humanPrompt: args.prompt.trim(),
-    approveExecution: args.approveExecution,
-    outputType: args.outputType
+    approveExecution: args.approveExecution
   });
 
   const cwd = process.cwd();

@@ -164,20 +164,89 @@ export interface CouncilMemberConfig {
   model: ModelConfig;
 }
 
-export interface DeliberationConfig {
-  highLevelRounds: number;
-  implementationRounds: number;
+export type CouncilOutputType = "none" | "documentation";
+
+export type PhaseContextVerbosity = "minimal" | "standard" | "full";
+export type PhaseTransitionTrigger = "MAJORITY_VOTE" | "ROUND_LIMIT" | "ALWAYS";
+export type PhaseFallbackAction = "END_SESSION" | "TRANSITION";
+
+export interface PhaseDeliverableConfig {
+  id: string;
+  description: string;
+  required: boolean;
+}
+
+export interface PhaseGovernanceConfig {
+  requireSeconding: boolean;
+  majorityThreshold: number;
+  abstainCountsAsNo: boolean;
+}
+
+export interface PhaseStopConditionsConfig {
+  maxRounds: number;
+  endOnMajorityVote: boolean;
+}
+
+export interface PhaseMemoryPolicyConfig {
+  readMemberMemory: boolean;
+  writeMemberMemory: boolean;
+  writeCouncilMemory: boolean;
+  includePriorPhaseSummary: boolean;
+}
+
+export interface PhaseEvidenceRequirementsConfig {
+  minCitations: number;
+  requireExplicitAssumptions: boolean;
+  requireRiskRegister: boolean;
+}
+
+export interface PhaseFallbackConfig {
+  resolution: string;
+  action: PhaseFallbackAction;
+  transitionToPhaseId?: string;
+}
+
+export interface PhaseTransitionConfig {
+  to: string;
+  when: PhaseTransitionTrigger;
+  reason?: string;
+  priority: number;
+}
+
+export interface CouncilSessionPhaseConfig {
+  id: string;
+  goal: string;
+  promptGuidance: string[];
+  deliverables: PhaseDeliverableConfig[];
+  governance: PhaseGovernanceConfig;
+  stopConditions: PhaseStopConditionsConfig;
+  memoryPolicy: PhaseMemoryPolicyConfig;
+  evidenceRequirements: PhaseEvidenceRequirementsConfig;
+  qualityGates: string[];
+  fallback: PhaseFallbackConfig;
+  transitions: PhaseTransitionConfig[];
+}
+
+export interface SessionPolicyConfig {
+  entryPhaseId: string;
+  maxPhaseTransitions: number;
+  phaseContextVerbosity: PhaseContextVerbosity;
 }
 
 export interface DocumentationReviewConfig {
   maxRevisionRounds: number;
 }
 
+export interface OutputConfig {
+  type: CouncilOutputType;
+}
+
 export interface CouncilConfig {
   councilName: string;
   purpose: string;
-  maxRounds?: number;
-  deliberation: DeliberationConfig;
+  sessionPolicy: SessionPolicyConfig;
+  phases: CouncilSessionPhaseConfig[];
+  output: OutputConfig;
   documentationReview: DocumentationReviewConfig;
   members: CouncilMemberConfig[];
   turnOrder?: string[];
@@ -194,10 +263,53 @@ export interface CouncilConfig {
 export interface SessionRunOptions {
   humanPrompt: string;
   approveExecution: boolean;
-  outputType?: CouncilOutputType;
 }
 
-export type CouncilOutputType = "none" | "documentation";
+export interface PhaseContextCurrentPhase {
+  id: string;
+  goal: string;
+  round: number;
+  maxRounds: number;
+  deliverables: PhaseDeliverableConfig[];
+  qualityGates: string[];
+  stopConditions: PhaseStopConditionsConfig;
+  evidenceRequirements: PhaseEvidenceRequirementsConfig;
+  promptGuidance: string[];
+  priorPhaseResolution?: string;
+}
+
+export interface PhaseContextGraphNodeDigest {
+  id: string;
+  goal: string;
+  transitions: {
+    to: string;
+    when: PhaseTransitionTrigger;
+  }[];
+}
+
+export interface PhaseContextProgressState {
+  roundsUsed: number;
+  deliverablesComplete: string[];
+  deliverablesPending: string[];
+  qualityGatesPassed: string[];
+  qualityGatesPending: string[];
+  openEvidenceGaps: string[];
+}
+
+export interface PhaseContextPacket {
+  verbosity: PhaseContextVerbosity;
+  currentPhase: PhaseContextCurrentPhase;
+  graphDigest: {
+    entryPhaseId: string;
+    nodes: PhaseContextGraphNodeDigest[];
+  };
+  progressState: PhaseContextProgressState;
+  transitionHints: {
+    to: string;
+    when: PhaseTransitionTrigger;
+    reason?: string;
+  }[];
+}
 
 export interface SessionResult {
   sessionId: string;

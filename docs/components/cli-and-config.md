@@ -19,8 +19,7 @@ Provide a stable entrypoint for users and contributors:
 
 - `run`
   - Required: `--config`, `--prompt`
-  - Optional: `--approve-execution`, `--output-type documentation`
-  - Prompt tag alternative: `[output:documentation] ...`
+  - Optional: `--approve-execution`
 - `onboard`
   - Required: `--config`
   - Optional: `--credentials`
@@ -28,12 +27,20 @@ Provide a stable entrypoint for users and contributors:
 ## Config Notes
 
 - `members[]` must be odd count and >= 3.
-- `deliberation.highLevelRounds` and `deliberation.implementationRounds` control the two-pass protocol.
+- `sessionPolicy.entryPhaseId` selects the first phase.
+- `sessionPolicy.maxPhaseTransitions` prevents infinite phase loops.
+- `sessionPolicy.phaseContextVerbosity` controls how much of the phase graph is injected into prompts.
+- `phases[]` defines the deliberation graph with per-phase rules:
+  - `stopConditions.maxRounds` and `endOnMajorityVote`
+  - `governance` (`requireSeconding`, `majorityThreshold`, `abstainCountsAsNo`)
+  - `deliverables`, `qualityGates`, `evidenceRequirements`, `memoryPolicy`
+  - `fallback` and `transitions` (directed graph)
 - `documentationReview.maxRevisionRounds` bounds documentation revision loops after failed doc approval votes.
+- `output.type` defines final artifact behavior for the run (`none` or `documentation`).
 - `turnOrder` sets deterministic round-robin order; when omitted, member declaration order is used.
 - Each member has `model` config with provider/model/base URL.
 - Auth is typically `credential-ref` after onboarding.
-- Legacy `maxRounds` is still accepted as a fallback/default for both passes when `deliberation` is omitted.
+- Config parsing/validation is implemented with `zod` plus graph integrity checks (reachable phases, valid transition targets, unique IDs).
 
 ## Contributor Touchpoints
 

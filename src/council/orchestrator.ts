@@ -14,9 +14,14 @@ import {
   CouncilMemberConfig,
   CouncilOutputType,
   CouncilPhase,
+  CouncilSessionPhaseConfig,
   LeaderElectionBallot,
   LeaderSummary,
   Motion,
+  PhaseContextGraphNodeDigest,
+  PhaseContextPacket,
+  PhaseGovernanceConfig,
+  PhaseTransitionConfig,
   SessionResult,
   SessionRunOptions,
   TurnAction,
@@ -29,7 +34,6 @@ import {
   buildDocumentApprovalVotePrompt,
   buildDocumentFeedbackPrompt,
   buildDocumentRevisionPrompt,
-  buildContinuationVotePrompt,
   buildDocumentationOutputPrompt,
   buildLeaderElectionPrompt,
   buildLeaderSummaryPrompt,
@@ -43,21 +47,13 @@ import {
   normalizeVoteResponse
 } from "./prompts.js";
 
-type DeliberationPassId = "HIGH_LEVEL" | "IMPLEMENTATION";
-
-interface DeliberationPassPlan {
-  id: DeliberationPassId;
-  objective: string;
-  maxRounds: number;
-  fallbackResolution: string;
-  priorPassResolution?: string;
-}
-
-interface DeliberationPassResult {
-  passId: DeliberationPassId;
+interface DeliberationPhaseResult {
+  phaseId: string;
+  phaseGoal: string;
   endedBy: SessionResult["endedBy"];
   finalResolution: string;
   winningMotion?: Motion;
+  roundsCompleted: number;
 }
 
 interface RuntimeState {
@@ -80,18 +76,18 @@ interface DocumentReviewFeedback {
   suggestedChanges: string[];
 }
 
-interface ContinuationVoteResult {
-  passed: boolean;
-  yesVotes: number;
-  noVotesEffective: number;
-}
-
 interface ApprovalVotePair {
   memberId: string;
   vote: VoteResponse;
 }
 
-interface DocumentApprovalVoteResult extends ContinuationVoteResult {
+interface VotePassResult {
+  passed: boolean;
+  yesVotes: number;
+  noVotesEffective: number;
+}
+
+interface DocumentApprovalVoteResult extends VotePassResult {
   votePairs: ApprovalVotePair[];
 }
 
@@ -103,17 +99,18 @@ interface DocumentationApprovalOutcome {
 export class CouncilOrchestrator {
   private readonly modelClients: Map<string, ModelClient>;
   private readonly memberById: Map<string, CouncilMemberConfig>;
+  private readonly phaseById: Map<string, CouncilSessionPhaseConfig>;
 
   constructor(private readonly config: CouncilConfig) {
-    this.memberById = new Map(config.members.map((m) => [m.id, m]));
+    this.memberById = new Map(config.members.map((member) => [member.id, member]));
+    this.phaseById = new Map(config.phases.map((phase) => [phase.id, phase]));
     this.modelClients = new Map(
-      config.members.map((m) => [m.id, buildModelClient(m.model)])
+      config.members.map((member) => [member.id, buildModelClient(member.model)])
     );
   }
 
   async run(options: SessionRunOptions): Promise<SessionResult> {
-    const outputType: CouncilOutputType = options.outputType ?? "none";
-    const deliberation = this.resolveDeliberationRounds();
+    const outputType: CouncilOutputType = this.config.output.type;
     await mkdir(this.config.storage.rootDir, { recursive: true });
     await mkdir(this.config.storage.memoryDir, { recursive: true });
 
@@ -149,8 +146,13 @@ export class CouncilOrchestrator {
 
     await appendEvent("SESSION_STARTED", 0, {
       humanPrompt: options.humanPrompt,
-      deliberation,
-      votingRule: "majority_of_full_council",
+      sessionPolicy: this.config.sessionPolicy,
+      phases: this.config.phases.map((phase) => ({
+        id: phase.id,
+        goal: phase.goal,
+        maxRounds: phase.stopConditions.maxRounds
+      })),
+      votingRule: "configurable_majority_threshold",
       blindVoting: true,
       outputType
     });
@@ -159,63 +161,21 @@ export class CouncilOrchestrator {
     const leaderId = await this.electLeader(sessionId, recorder, appendEvent);
     const leader = this.requireMember(leaderId);
 
-    const highLevelPlan: DeliberationPassPlan = {
-      id: "HIGH_LEVEL",
-      objective: this.buildHighLevelObjective(),
-      maxRounds: deliberation.highLevelRounds,
-      fallbackResolution: "No majority high-level plan reached within configured rounds."
-    };
+    const phaseResults: DeliberationPhaseResult[] = [];
+    let priorPhaseResolution: string | undefined;
+    let nextPhaseId: string | undefined = this.config.sessionPolicy.entryPhaseId;
+    let forcedStopReason: string | undefined;
 
-    const highLevelResult = await this.runDeliberationPass({
-      plan: highLevelPlan,
-      sessionId,
-      humanPrompt: options.humanPrompt,
-      turnOrder,
-      recorder,
-      memoryStore,
-      appendEvent,
-      state
-    });
-
-    const implementationPlan: DeliberationPassPlan = {
-      id: "IMPLEMENTATION",
-      objective: this.buildImplementationObjective(),
-      maxRounds: deliberation.implementationRounds,
-      fallbackResolution: "No majority implementation plan reached within configured rounds.",
-      priorPassResolution: highLevelResult.finalResolution
-    };
-
-    let implementationResult: DeliberationPassResult | undefined;
-    let implementationSkippedReason: string | undefined;
-
-    if (highLevelResult.endedBy === "ROUND_LIMIT") {
-      const continuationVote = await this.runContinuationVote({
-        sessionId,
-        turnOrder,
-        recorder,
-        appendEvent,
-        state,
-        highLevelResolution: highLevelResult.finalResolution,
-        highLevelRoundLimit: deliberation.highLevelRounds
-      });
-      if (continuationVote.passed) {
-        implementationResult = await this.runDeliberationPass({
-          plan: implementationPlan,
-          sessionId,
-          humanPrompt: options.humanPrompt,
-          turnOrder,
-          recorder,
-          memoryStore,
-          appendEvent,
-          state
-        });
-      } else {
-        implementationSkippedReason =
-          "Session closed after high-level round limit; continuation vote to implementation did not pass.";
+    while (nextPhaseId) {
+      if (phaseResults.length >= this.config.sessionPolicy.maxPhaseTransitions) {
+        forcedStopReason = `Session stopped at maxPhaseTransitions=${this.config.sessionPolicy.maxPhaseTransitions} before entering phase ${nextPhaseId}.`;
+        break;
       }
-    } else {
-      implementationResult = await this.runDeliberationPass({
-        plan: implementationPlan,
+
+      const phaseConfig = this.requirePhase(nextPhaseId);
+      const result = await this.runDeliberationPhase({
+        phaseConfig,
+        priorPhaseResolution,
         sessionId,
         humanPrompt: options.humanPrompt,
         turnOrder,
@@ -224,27 +184,38 @@ export class CouncilOrchestrator {
         appendEvent,
         state
       });
+      phaseResults.push(result);
+
+      const transition = this.resolveNextPhaseTransition(phaseConfig, result.endedBy);
+      if (!transition) {
+        break;
+      }
+      priorPhaseResolution = result.finalResolution;
+      nextPhaseId = transition.to;
     }
 
-    const finalPass: DeliberationPassResult = implementationResult ?? {
-      passId: "HIGH_LEVEL",
-      endedBy: "ROUND_LIMIT",
-      finalResolution:
-        implementationSkippedReason ??
-        "Session closed: continuation to implementation did not pass.",
-      winningMotion: highLevelResult.winningMotion
-    };
+    if (phaseResults.length === 0) {
+      throw new Error("Session terminated before running any configured phase.");
+    }
+
+    const latestPhase = phaseResults[phaseResults.length - 1];
+    const terminalResult: DeliberationPhaseResult = forcedStopReason
+      ? {
+          ...latestPhase,
+          endedBy: "ROUND_LIMIT",
+          finalResolution: forcedStopReason
+        }
+      : latestPhase;
+
     state.phase = "CLOSED";
-    const totalConfiguredRounds =
-      deliberation.highLevelRounds +
-      (implementationResult ? deliberation.implementationRounds : 0);
+    const totalRoundsExecuted = phaseResults.reduce((sum, result) => sum + result.roundsCompleted, 0);
 
     const leaderSummaryPrompt = buildLeaderSummaryPrompt(
       this.config,
       leader,
       recorder.getTranscript(),
-      finalPass.endedBy,
-      finalPass.finalResolution,
+      terminalResult.endedBy,
+      terminalResult.finalResolution,
       outputType
     );
 
@@ -257,15 +228,20 @@ export class CouncilOrchestrator {
         stage: "leader_summary",
         sessionId,
         memberId: leaderId,
-        round: totalConfiguredRounds,
+        round: totalRoundsExecuted,
         turnIndex: state.turnIndex
       }
     );
-    const leaderSummary = normalizeLeaderSummary(leaderSummaryRaw, finalPass.finalResolution, outputType);
+    const leaderSummary = normalizeLeaderSummary(
+      leaderSummaryRaw,
+      terminalResult.finalResolution,
+      outputType
+    );
 
-    await appendEvent("LEADER_SUMMARY", totalConfiguredRounds, leaderSummary, leaderId);
+    await appendEvent("LEADER_SUMMARY", totalRoundsExecuted, leaderSummary, leaderId);
     await recorder.writeLeaderSummary(leaderSummary.summaryMarkdown);
 
+    const phaseResolutionSummary = this.buildPhaseResolutionSummary(phaseResults);
     let outputDocumentFile: string | undefined;
     let documentationApproved: boolean | undefined;
     if (outputType === "documentation") {
@@ -273,10 +249,7 @@ export class CouncilOrchestrator {
         sessionId,
         leader,
         humanPrompt: options.humanPrompt,
-        highLevelResolution: highLevelResult.finalResolution,
-        implementationResolution: implementationResult
-          ? leaderSummary.finalResolution
-          : `Implementation pass skipped. ${implementationSkippedReason ?? "Continuation vote failed."}`,
+        phaseResolutionSummary,
         recorder,
         appendEvent,
         state
@@ -285,7 +258,7 @@ export class CouncilOrchestrator {
       documentationApproved = docOutcome.approved;
       await appendEvent(
         "OUTPUT_ARTIFACT_WRITTEN",
-        totalConfiguredRounds,
+        totalRoundsExecuted,
         { outputType, file: outputDocumentFile, approved: documentationApproved },
         leaderId
       );
@@ -303,61 +276,54 @@ export class CouncilOrchestrator {
         approved: executionApproved,
         approvalRequired: this.config.execution.requireHumanApproval,
         defaultExecutorProfile: this.config.execution.defaultExecutorProfile,
-        motionId: finalPass.winningMotion?.motionId ?? null,
+        motionId: terminalResult.winningMotion?.motionId ?? null,
         leaderId,
         executionBrief: leaderSummary.executionBrief
       };
       await writeFile(executionHandoffFile, `${toJsonString(handoffPayload)}\n`, "utf8");
     }
 
-    await appendEvent(
-      "SESSION_CLOSED",
-      totalConfiguredRounds,
-      {
-        endedBy: finalPass.endedBy,
-        finalResolution: leaderSummary.finalResolution,
-        requiresExecution: leaderSummary.requiresExecution,
-        executionApproved,
-        documentationApproved: documentationApproved ?? null,
-        outputType
-      }
-    );
-
-    await memoryStore.recordSession({
-      sessionId,
-      humanPrompt: options.humanPrompt,
-      leaderId,
-      endedBy: finalPass.endedBy,
+    await appendEvent("SESSION_CLOSED", totalRoundsExecuted, {
+      endedBy: terminalResult.endedBy,
       finalResolution: leaderSummary.finalResolution,
-      outputType,
-      leaderSummary,
-      events: recorder.getEvents(),
-      executionApproved
+      requiresExecution: leaderSummary.requiresExecution,
+      executionApproved,
+      documentationApproved: documentationApproved ?? null,
+      outputType
     });
+
+    const shouldWriteMemory = phaseResults.some((result) => {
+      const phase = this.requirePhase(result.phaseId);
+      return phase.memoryPolicy.writeCouncilMemory || phase.memoryPolicy.writeMemberMemory;
+    });
+
+    if (shouldWriteMemory) {
+      await memoryStore.recordSession({
+        sessionId,
+        humanPrompt: options.humanPrompt,
+        leaderId,
+        endedBy: terminalResult.endedBy,
+        finalResolution: leaderSummary.finalResolution,
+        outputType,
+        leaderSummary,
+        events: recorder.getEvents(),
+        executionApproved
+      });
+    }
 
     await recorder.finalize({
       sessionId,
       councilName: this.config.councilName,
       leaderId,
-      deliberation,
-      passResolutions: {
-        highLevel: highLevelResult,
-        implementation:
-          implementationResult ??
-          ({
-            passId: "IMPLEMENTATION",
-            skipped: true,
-            reason:
-              implementationSkippedReason ??
-              "High-level pass reached round limit and continuation vote did not pass."
-          } as const)
-      },
-      endedBy: finalPass.endedBy,
+      sessionPolicy: this.config.sessionPolicy,
+      phaseResults,
+      transitionLimitReached: Boolean(forcedStopReason),
+      endedBy: terminalResult.endedBy,
       finalResolution: leaderSummary.finalResolution,
       requiresExecution: leaderSummary.requiresExecution,
       executionApproved,
       documentationApproved: documentationApproved ?? null,
-      winningMotion: finalPass.winningMotion,
+      winningMotion: terminalResult.winningMotion,
       outputType,
       outputDocumentFile
     });
@@ -365,7 +331,7 @@ export class CouncilOrchestrator {
     return {
       sessionId,
       leaderId,
-      endedBy: finalPass.endedBy,
+      endedBy: terminalResult.endedBy,
       finalResolution: leaderSummary.finalResolution,
       requiresExecution: leaderSummary.requiresExecution,
       executionApproved,
@@ -379,8 +345,9 @@ export class CouncilOrchestrator {
     };
   }
 
-  private async runDeliberationPass(input: {
-    plan: DeliberationPassPlan;
+  private async runDeliberationPhase(input: {
+    phaseConfig: CouncilSessionPhaseConfig;
+    priorPhaseResolution?: string;
     sessionId: string;
     humanPrompt: string;
     turnOrder: string[];
@@ -393,27 +360,45 @@ export class CouncilOrchestrator {
       actorId?: string
     ) => Promise<void>;
     state: RuntimeState;
-  }): Promise<DeliberationPassResult> {
-    const { plan, sessionId, humanPrompt, turnOrder, recorder, memoryStore, appendEvent, state } = input;
+  }): Promise<DeliberationPhaseResult> {
+    const {
+      phaseConfig,
+      priorPhaseResolution,
+      sessionId,
+      humanPrompt,
+      turnOrder,
+      recorder,
+      memoryStore,
+      appendEvent,
+      state
+    } = input;
 
     await appendEvent("PASS_STARTED", 0, {
-      passId: plan.id,
-      objective: plan.objective,
-      maxRounds: plan.maxRounds,
-      priorPassResolution: plan.priorPassResolution ?? null
+      passId: phaseConfig.id,
+      objective: phaseConfig.goal,
+      maxRounds: phaseConfig.stopConditions.maxRounds,
+      deliverables: phaseConfig.deliverables,
+      qualityGates: phaseConfig.qualityGates,
+      priorPhaseResolution: priorPhaseResolution ?? null
     });
 
     let closed = false;
     let endedBy: SessionResult["endedBy"] = "ROUND_LIMIT";
-    let finalResolution = plan.fallbackResolution;
+    let finalResolution = phaseConfig.fallback.resolution;
     let winningMotion: Motion | undefined;
+    let roundsCompleted = 0;
 
-    for (let round = 1; round <= plan.maxRounds && !closed; round += 1) {
+    for (
+      let round = 1;
+      round <= phaseConfig.stopConditions.maxRounds && !closed;
+      round += 1
+    ) {
+      roundsCompleted = round;
       await appendEvent("ROUND_STARTED", round, {
-        passId: plan.id,
-        objective: plan.objective,
+        passId: phaseConfig.id,
+        objective: phaseConfig.goal,
         round,
-        maxRounds: plan.maxRounds,
+        maxRounds: phaseConfig.stopConditions.maxRounds,
         turnOrder
       });
 
@@ -427,19 +412,29 @@ export class CouncilOrchestrator {
 
         const speaker = this.requireMember(speakerId);
         const client = this.requireClient(speakerId);
-        const turnsRemainingForSpeaker = plan.maxRounds - round + 1;
+        const turnsRemainingForSpeaker = phaseConfig.stopConditions.maxRounds - round + 1;
+        const phaseContext = this.buildPhaseContextPacket({
+          phaseConfig,
+          currentRound: round,
+          priorPhaseResolution:
+            phaseConfig.memoryPolicy.includePriorPhaseSummary ? priorPhaseResolution : undefined
+        });
+
+        const memberMemory = phaseConfig.memoryPolicy.readMemberMemory
+          ? await memoryStore.readMemberMemory(speaker.id)
+          : "Member memory access disabled for this phase.";
 
         const turnPrompt = buildTurnPrompt({
           config: this.config,
           member: speaker,
           humanPrompt,
           transcript: recorder.getTranscript(),
-          memberMemory: await memoryStore.readMemberMemory(speaker.id),
-          passId: plan.id,
-          passObjective: plan.objective,
-          priorPassResolution: plan.priorPassResolution,
+          memberMemory,
+          phaseId: phaseConfig.id,
+          phaseGoal: phaseConfig.goal,
+          phaseContext,
           currentRound: round,
-          maxRounds: plan.maxRounds,
+          maxRounds: phaseConfig.stopConditions.maxRounds,
           turnsRemainingForSpeaker
         });
 
@@ -457,13 +452,13 @@ export class CouncilOrchestrator {
           }
         );
         const action = normalizeTurnAction(actionRaw);
-        await appendEvent("TURN_ACTION", round, { ...action, passId: plan.id }, speaker.id);
+        await appendEvent("TURN_ACTION", round, { ...action, passId: phaseConfig.id }, speaker.id);
 
         if (action.action === "CONTRIBUTE") {
           await appendEvent(
             "MESSAGE_CONTRIBUTED",
             round,
-            { message: action.message, passId: plan.id },
+            { message: action.message, passId: phaseConfig.id },
             speaker.id
           );
           continue;
@@ -473,7 +468,7 @@ export class CouncilOrchestrator {
           await appendEvent(
             "PASS_RECORDED",
             round,
-            { reason: action.reason, note: action.note ?? null, passId: plan.id },
+            { reason: action.reason, note: action.note ?? null, passId: phaseConfig.id },
             speaker.id
           );
           continue;
@@ -489,65 +484,73 @@ export class CouncilOrchestrator {
           turnIndex: state.turnIndex
         };
 
-        await appendEvent("MOTION_CALLED", round, { ...motion, passId: plan.id }, speaker.id);
-        state.phase = "SECONDING";
+        await appendEvent("MOTION_CALLED", round, { ...motion, passId: phaseConfig.id }, speaker.id);
 
-        const nonCallerIds = turnOrder.filter((id) => id !== speaker.id);
-        const secondingPairs = await Promise.all(
-          nonCallerIds.map(async (memberId) => {
-            const member = this.requireMember(memberId);
-            const secondingPrompt = buildSecondingPrompt(
-              this.config,
-              member,
-              motion,
-              recorder.getTranscript(),
-              plan.id,
-              plan.objective
-            );
-            const secondRaw = await this.completeJsonSafe(
-              this.requireClient(memberId),
-              member.systemPrompt,
-              secondingPrompt,
-              { temperature: member.model.temperature, maxTokens: member.model.maxTokens },
-              {
-                stage: "motion_seconding",
-                sessionId,
-                memberId,
-                round,
-                turnIndex: state.turnIndex
-              }
-            );
-            return { memberId, response: normalizeSecondingResponse(secondRaw) };
-          })
-        );
+        let motionSeconded = true;
+        if (phaseConfig.governance.requireSeconding) {
+          state.phase = "SECONDING";
+          const nonCallerIds = turnOrder.filter((id) => id !== speaker.id);
+          const secondingPairs = await Promise.all(
+            nonCallerIds.map(async (memberId) => {
+              const member = this.requireMember(memberId);
+              const secondingPrompt = buildSecondingPrompt(
+                this.config,
+                member,
+                motion,
+                recorder.getTranscript(),
+                phaseConfig.id,
+                phaseConfig.goal
+              );
+              const secondRaw = await this.completeJsonSafe(
+                this.requireClient(memberId),
+                member.systemPrompt,
+                secondingPrompt,
+                { temperature: member.model.temperature, maxTokens: member.model.maxTokens },
+                {
+                  stage: "motion_seconding",
+                  sessionId,
+                  memberId,
+                  round,
+                  turnIndex: state.turnIndex
+                }
+              );
+              return { memberId, response: normalizeSecondingResponse(secondRaw) };
+            })
+          );
 
-        for (const item of secondingPairs) {
-          await appendEvent("SECONDING_RESPONSE", round, { ...item.response, passId: plan.id }, item.memberId);
+          for (const item of secondingPairs) {
+            await appendEvent(
+              "SECONDING_RESPONSE",
+              round,
+              { ...item.response, passId: phaseConfig.id },
+              item.memberId
+            );
+          }
+
+          const seconderId = secondingPairs.find((pair) => pair.response.second)?.memberId;
+          if (!seconderId) {
+            await appendEvent("MOTION_NOT_SECONDED", round, {
+              motionId: motion.motionId,
+              calledBy: speaker.id,
+              passId: phaseConfig.id
+            });
+            motionSeconded = false;
+            state.phase = "DISCUSSION";
+          } else {
+            await appendEvent(
+              "MOTION_SECONDED",
+              round,
+              { motionId: motion.motionId, secondedBy: seconderId, passId: phaseConfig.id },
+              seconderId
+            );
+          }
         }
 
-        const seconderId = nonCallerIds.find((candidateId) => {
-          const item = secondingPairs.find((pair) => pair.memberId === candidateId);
-          return item?.response.second;
-        });
-
-        if (!seconderId) {
-          await appendEvent(
-            "MOTION_NOT_SECONDED",
-            round,
-            { motionId: motion.motionId, calledBy: speaker.id, passId: plan.id }
-          );
-          state.phase = "DISCUSSION";
+        if (!motionSeconded) {
           continue;
         }
 
-        await appendEvent(
-          "MOTION_SECONDED",
-          round,
-          { motionId: motion.motionId, secondedBy: seconderId, passId: plan.id },
-          seconderId
-        );
         state.phase = "VOTING";
-
         const votePairs = await Promise.all(
           turnOrder.map(async (memberId) => {
             const member = this.requireMember(memberId);
@@ -556,8 +559,9 @@ export class CouncilOrchestrator {
               member,
               motion,
               recorder.getTranscript(),
-              plan.id,
-              plan.objective
+              phaseConfig.id,
+              phaseConfig.goal,
+              phaseConfig.governance
             );
             const voteRaw = await this.completeJsonSafe<VoteResponse>(
               this.requireClient(memberId),
@@ -576,56 +580,61 @@ export class CouncilOrchestrator {
           })
         );
 
-        // Blind collection completed. Only now are ballots written to record.
         for (const pair of votePairs) {
           await appendEvent(
             "VOTE_CAST",
             round,
-            { motionId: motion.motionId, ...pair.vote, passId: plan.id },
+            { motionId: motion.motionId, ...pair.vote, passId: phaseConfig.id },
             pair.memberId
           );
         }
 
-        const passResult = this.computeVotePass(votePairs.map((v) => v.vote.ballot));
+        const passResult = this.computeVotePass(
+          votePairs.map((item) => item.vote.ballot),
+          phaseConfig.governance
+        );
         await appendEvent("VOTE_RESULT", round, {
-          passId: plan.id,
+          passId: phaseConfig.id,
           motionId: motion.motionId,
           passed: passResult.passed,
           yesVotes: passResult.yesVotes,
           noVotesEffective: passResult.noVotesEffective,
-          totalCouncilSize: turnOrder.length
+          totalCouncilSize: turnOrder.length,
+          majorityThreshold: phaseConfig.governance.majorityThreshold
         });
 
         state.phase = "DISCUSSION";
-        if (passResult.passed) {
+        if (passResult.passed && phaseConfig.stopConditions.endOnMajorityVote) {
           closed = true;
           endedBy = "MAJORITY_VOTE";
           finalResolution = motion.decisionIfPass;
           winningMotion = motion;
-          break;
         }
       }
     }
 
     if (!closed) {
-      await appendEvent("ROUND_LIMIT_REACHED", plan.maxRounds, {
-        passId: plan.id,
-        maxRounds: plan.maxRounds
+      await appendEvent("ROUND_LIMIT_REACHED", roundsCompleted, {
+        passId: phaseConfig.id,
+        maxRounds: phaseConfig.stopConditions.maxRounds,
+        fallback: phaseConfig.fallback
       });
     }
 
-    await appendEvent("PASS_COMPLETED", plan.maxRounds, {
-      passId: plan.id,
+    await appendEvent("PASS_COMPLETED", roundsCompleted, {
+      passId: phaseConfig.id,
       endedBy,
       finalResolution,
       motionId: winningMotion?.motionId ?? null
     });
 
     return {
-      passId: plan.id,
+      phaseId: phaseConfig.id,
+      phaseGoal: phaseConfig.goal,
       endedBy,
       finalResolution,
-      winningMotion
+      winningMotion,
+      roundsCompleted
     };
   }
 
@@ -633,8 +642,7 @@ export class CouncilOrchestrator {
     sessionId: string;
     leader: CouncilMemberConfig;
     humanPrompt: string;
-    highLevelResolution: string;
-    implementationResolution: string;
+    phaseResolutionSummary: string;
     recorder: SessionRecorder;
     appendEvent: (
       type: CouncilEvent["type"],
@@ -648,8 +656,7 @@ export class CouncilOrchestrator {
       sessionId,
       leader,
       humanPrompt,
-      highLevelResolution,
-      implementationResolution,
+      phaseResolutionSummary,
       recorder,
       appendEvent,
       state
@@ -661,8 +668,7 @@ export class CouncilOrchestrator {
       leader,
       humanPrompt,
       recorder.getTranscript(),
-      highLevelResolution,
-      implementationResolution
+      phaseResolutionSummary
     );
     let draft = await this.requireClient(leader.id).completeText(
       [
@@ -720,8 +726,7 @@ export class CouncilOrchestrator {
         this.config,
         leader,
         humanPrompt,
-        highLevelResolution,
-        implementationResolution,
+        phaseResolutionSummary,
         draft,
         toJsonString(latestFeedback),
         revision + 1
@@ -808,7 +813,11 @@ export class CouncilOrchestrator {
       );
     }
 
-    const passResult = this.computeVotePass(votePairs.map((item) => item.vote.ballot));
+    const passResult = this.computeVotePass(votePairs.map((item) => item.vote.ballot), {
+      requireSeconding: true,
+      majorityThreshold: 0.5,
+      abstainCountsAsNo: true
+    });
     await appendEvent("DOCUMENT_APPROVAL_VOTE_RESULT", revision, {
       revision,
       passed: passResult.passed,
@@ -848,12 +857,7 @@ export class CouncilOrchestrator {
     const feedback = await Promise.all(
       reviewerIds.map(async (memberId) => {
         const member = this.requireMember(memberId);
-        const prompt = buildDocumentFeedbackPrompt(
-          this.config,
-          member,
-          draftMarkdown,
-          revision
-        );
+        const prompt = buildDocumentFeedbackPrompt(this.config, member, draftMarkdown, revision);
         const raw = await this.completeJsonSafe<unknown>(
           this.requireClient(memberId),
           member.systemPrompt,
@@ -951,79 +955,6 @@ export class CouncilOrchestrator {
     };
   }
 
-  private async runContinuationVote(input: {
-    sessionId: string;
-    turnOrder: string[];
-    recorder: SessionRecorder;
-    appendEvent: (
-      type: CouncilEvent["type"],
-      round: number,
-      payload: unknown,
-      actorId?: string
-    ) => Promise<void>;
-    state: RuntimeState;
-    highLevelResolution: string;
-    highLevelRoundLimit: number;
-  }): Promise<ContinuationVoteResult> {
-    const { sessionId, turnOrder, recorder, appendEvent, state, highLevelResolution, highLevelRoundLimit } =
-      input;
-
-    state.phase = "VOTING";
-    await appendEvent("CONTINUATION_VOTE_CALLED", highLevelRoundLimit, {
-      fromPass: "HIGH_LEVEL",
-      toPass: "IMPLEMENTATION",
-      reason: "High-level pass reached configured round limit.",
-      highLevelResolution
-    });
-
-    const votePairs = await Promise.all(
-      turnOrder.map(async (memberId) => {
-        const member = this.requireMember(memberId);
-        const votePrompt = buildContinuationVotePrompt(
-          this.config,
-          member,
-          highLevelResolution,
-          recorder.getTranscript()
-        );
-        const voteRaw = await this.completeJsonSafe<VoteResponse>(
-          this.requireClient(memberId),
-          member.systemPrompt,
-          votePrompt,
-          { temperature: member.model.temperature, maxTokens: member.model.maxTokens },
-          {
-            stage: "continuation_vote",
-            sessionId,
-            memberId,
-            round: highLevelRoundLimit,
-            turnIndex: state.turnIndex
-          }
-        );
-        return { memberId, vote: normalizeVoteResponse(voteRaw) };
-      })
-    );
-
-    for (const pair of votePairs) {
-      await appendEvent(
-        "VOTE_CAST",
-        highLevelRoundLimit,
-        { voteType: "CONTINUATION_TO_IMPLEMENTATION", ...pair.vote, passId: "HIGH_LEVEL" },
-        pair.memberId
-      );
-    }
-
-    const passResult = this.computeVotePass(votePairs.map((v) => v.vote.ballot));
-    await appendEvent("CONTINUATION_VOTE_RESULT", highLevelRoundLimit, {
-      voteType: "CONTINUATION_TO_IMPLEMENTATION",
-      passed: passResult.passed,
-      yesVotes: passResult.yesVotes,
-      noVotesEffective: passResult.noVotesEffective,
-      totalCouncilSize: turnOrder.length
-    });
-    state.phase = "DISCUSSION";
-
-    return passResult;
-  }
-
   private async electLeader(
     sessionId: string,
     recorder: SessionRecorder,
@@ -1034,7 +965,7 @@ export class CouncilOrchestrator {
       actorId?: string
     ) => Promise<void>
   ): Promise<string> {
-    const memberIds = new Set(this.config.members.map((m) => m.id));
+    const memberIds = new Set(this.config.members.map((member) => member.id));
     const ballots = await Promise.all(
       this.config.members.map(async (member) => {
         const prompt = buildLeaderElectionPrompt(this.config, member, recorder.getTranscript());
@@ -1078,19 +1009,177 @@ export class CouncilOrchestrator {
     return winner;
   }
 
-  private computeVotePass(ballots: Ballot[]): {
-    passed: boolean;
-    yesVotes: number;
-    noVotesEffective: number;
-  } {
+  private computeVotePass(ballots: Ballot[], governance: PhaseGovernanceConfig): VotePassResult {
     const total = ballots.length;
-    const yesVotes = ballots.filter((b) => b === "YES").length;
-    const noVotesEffective = total - yesVotes;
+    const yesVotes = ballots.filter((ballot) => ballot === "YES").length;
+    const noVotesEffective = governance.abstainCountsAsNo
+      ? total - yesVotes
+      : ballots.filter((ballot) => ballot === "NO").length;
+
+    const requiredYesVotes =
+      governance.majorityThreshold === 0.5
+        ? Math.floor(total / 2) + 1
+        : Math.ceil(total * governance.majorityThreshold);
+
     return {
-      passed: yesVotes > total / 2,
+      passed: yesVotes >= requiredYesVotes,
       yesVotes,
       noVotesEffective
     };
+  }
+
+  private resolveNextPhaseTransition(
+    phaseConfig: CouncilSessionPhaseConfig,
+    endedBy: SessionResult["endedBy"]
+  ): PhaseTransitionConfig | undefined {
+    const trigger = endedBy === "MAJORITY_VOTE" ? "MAJORITY_VOTE" : "ROUND_LIMIT";
+    const candidates = phaseConfig.transitions
+      .filter((transition) => transition.when === "ALWAYS" || transition.when === trigger)
+      .sort((a, b) => {
+        if (a.priority === b.priority) {
+          return a.to.localeCompare(b.to);
+        }
+        return a.priority - b.priority;
+      });
+    if (candidates.length > 0) {
+      return candidates[0];
+    }
+
+    if (
+      endedBy === "ROUND_LIMIT" &&
+      phaseConfig.fallback.action === "TRANSITION" &&
+      phaseConfig.fallback.transitionToPhaseId
+    ) {
+      return {
+        to: phaseConfig.fallback.transitionToPhaseId,
+        when: "ROUND_LIMIT",
+        reason: "fallback_transition",
+        priority: Number.MAX_SAFE_INTEGER
+      };
+    }
+
+    return undefined;
+  }
+
+  private buildPhaseContextPacket(input: {
+    phaseConfig: CouncilSessionPhaseConfig;
+    currentRound: number;
+    priorPhaseResolution?: string;
+  }): PhaseContextPacket {
+    const { phaseConfig, currentRound, priorPhaseResolution } = input;
+    const requiredDeliverables = phaseConfig.deliverables.filter((deliverable) => deliverable.required);
+    const openEvidenceGaps: string[] = [];
+    if (phaseConfig.evidenceRequirements.minCitations > 0) {
+      openEvidenceGaps.push(
+        `Need at least ${phaseConfig.evidenceRequirements.minCitations} references or citations.`
+      );
+    }
+    if (phaseConfig.evidenceRequirements.requireExplicitAssumptions) {
+      openEvidenceGaps.push("Explicit assumptions must be listed.");
+    }
+    if (phaseConfig.evidenceRequirements.requireRiskRegister) {
+      openEvidenceGaps.push("Risk register entries are required.");
+    }
+
+    return {
+      verbosity: this.config.sessionPolicy.phaseContextVerbosity,
+      currentPhase: {
+        id: phaseConfig.id,
+        goal: phaseConfig.goal,
+        round: currentRound,
+        maxRounds: phaseConfig.stopConditions.maxRounds,
+        deliverables: phaseConfig.deliverables,
+        qualityGates: phaseConfig.qualityGates,
+        stopConditions: phaseConfig.stopConditions,
+        evidenceRequirements: phaseConfig.evidenceRequirements,
+        promptGuidance: phaseConfig.promptGuidance,
+        priorPhaseResolution
+      },
+      graphDigest: {
+        entryPhaseId: this.config.sessionPolicy.entryPhaseId,
+        nodes: this.buildGraphDigest(phaseConfig.id)
+      },
+      progressState: {
+        roundsUsed: currentRound,
+        deliverablesComplete: [],
+        deliverablesPending: requiredDeliverables.map((deliverable) => deliverable.id),
+        qualityGatesPassed: [],
+        qualityGatesPending: phaseConfig.qualityGates,
+        openEvidenceGaps
+      },
+      transitionHints: phaseConfig.transitions
+        .slice()
+        .sort((a, b) => {
+          if (a.priority === b.priority) {
+            return a.to.localeCompare(b.to);
+          }
+          return a.priority - b.priority;
+        })
+        .map((transition) => ({
+          to: transition.to,
+          when: transition.when,
+          reason: transition.reason
+        }))
+    };
+  }
+
+  private buildGraphDigest(currentPhaseId: string): PhaseContextGraphNodeDigest[] {
+    const verbosity = this.config.sessionPolicy.phaseContextVerbosity;
+    if (verbosity === "full") {
+      return this.config.phases.map((phase) => ({
+        id: phase.id,
+        goal: phase.goal,
+        transitions: phase.transitions.map((transition) => ({
+          to: transition.to,
+          when: transition.when
+        }))
+      }));
+    }
+
+    if (verbosity === "minimal") {
+      const current = this.requirePhase(currentPhaseId);
+      return [
+        {
+          id: current.id,
+          goal: current.goal,
+          transitions: current.transitions.map((transition) => ({
+            to: transition.to,
+            when: transition.when
+          }))
+        }
+      ];
+    }
+
+    const current = this.requirePhase(currentPhaseId);
+    const ids = new Set<string>([current.id]);
+    for (const transition of current.transitions) {
+      ids.add(transition.to);
+    }
+    for (const phase of this.config.phases) {
+      if (phase.transitions.some((transition) => transition.to === current.id)) {
+        ids.add(phase.id);
+      }
+    }
+
+    return this.config.phases
+      .filter((phase) => ids.has(phase.id))
+      .map((phase) => ({
+        id: phase.id,
+        goal: phase.goal,
+        transitions: phase.transitions.map((transition) => ({
+          to: transition.to,
+          when: transition.when
+        }))
+      }));
+  }
+
+  private buildPhaseResolutionSummary(results: DeliberationPhaseResult[]): string {
+    return results
+      .map(
+        (result, index) =>
+          `${index + 1}. ${result.phaseId} (${result.endedBy}): ${result.finalResolution}`
+      )
+      .join("\n");
   }
 
   private async completeJsonSafe<T>(
@@ -1126,7 +1215,6 @@ export class CouncilOrchestrator {
           message: error.message,
           rawPreview: error.rawResponse.slice(0, 1200)
         });
-        // Deterministic fallback handled by normalizers.
         return {
           __errorType: "json_parse_error",
           message: error.message,
@@ -1147,36 +1235,11 @@ export class CouncilOrchestrator {
     }
   }
 
-  private resolveDeliberationRounds(): {
-    highLevelRounds: number;
-    implementationRounds: number;
-  } {
-    const fallback = this.config.maxRounds ?? 5;
-    return {
-      highLevelRounds: this.config.deliberation?.highLevelRounds ?? fallback,
-      implementationRounds: this.config.deliberation?.implementationRounds ?? fallback
-    };
-  }
-
-  private buildHighLevelObjective(): string {
-    return [
-      "Define high-level architecture, principal risks, and decision boundaries.",
-      "Produce measurable acceptance criteria that implementation must satisfy."
-    ].join(" ");
-  }
-
-  private buildImplementationObjective(): string {
-    return [
-      "Critique unresolved ambiguities from the high-level pass and resolve them.",
-      "Produce concrete implementation specifics: APIs, state/resources, scheduler behavior, lease/coordination mechanics, failure modes, and staged rollout tasks."
-    ].join(" ");
-  }
-
   private resolveTurnOrder(): string[] {
     if (this.config.turnOrder) {
       return this.config.turnOrder;
     }
-    return this.config.members.map((m) => m.id);
+    return this.config.members.map((member) => member.id);
   }
 
   private requireMember(memberId: string): CouncilMemberConfig {
@@ -1193,5 +1256,13 @@ export class CouncilOrchestrator {
       throw new Error(`Missing model client for member id: ${memberId}`);
     }
     return client;
+  }
+
+  private requirePhase(phaseId: string): CouncilSessionPhaseConfig {
+    const phase = this.phaseById.get(phaseId);
+    if (!phase) {
+      throw new Error(`Unknown phase id: ${phaseId}`);
+    }
+    return phase;
   }
 }
